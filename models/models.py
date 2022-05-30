@@ -252,8 +252,8 @@ class Dropout_Linear(nn.Module):
     if self.use_bias:
       self.bias = nn.Parameter(data=torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [out_features], dtype=dtype, device=device))
     self.dropout_rate = dropout_rate
-    if dropout_type != "w" and dropout_type != "f":
-      raise ValueError("The dropout_type should be either w(weight) or f(feature).")
+    if dropout_type not in ["w", "f", "c"]:
+      raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type=dropout_type
   
   def dropout(x, p):
