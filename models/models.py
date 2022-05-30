@@ -192,7 +192,7 @@ def resnet18():
                       nn.Flatten(), nn.Linear(512, 20))
   return net
 
-def get_swag_parameter(model, train_dataloader, num_samples, frequency, lr, loss_fn, rank):
+def get_swag_parameter(model, train_dataloader, lr, loss_fn, num_samples, frequency, rank):
   new_model = copy.deepcopy(model)
   optim = torch.optim.SGD(new_model.parameters(), lr)
 
