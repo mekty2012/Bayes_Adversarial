@@ -23,6 +23,7 @@ class Gaussian_Linear(nn.Module):
               dtype=None, # Datatype of layer.
               init_dict=dict() # The dictionary of parameters.
               ):
+    super(Gaussian_Linear, self).__init__()
     k = sqrt(1 / in_features)
     self.init_dict = {"w_mu_mean" : 0,  "w_mu_std" : k, 
                       "w_sig_mean" : 0, "w_sig_std" : k, 
@@ -83,6 +84,7 @@ class Gaussian_Conv2D_LRT(nn.Module):
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
+    super(Gaussian_Conv2D_LRT, self).__init__()
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -111,25 +113,25 @@ class Gaussian_Conv2D_LRT(nn.Module):
       raise ValueError("in_channels must be divisible by groups")
     shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     self.weight_mu = nn.Parameter(data=torch.normal(self.init_dict["w_mu_mean"], self.init_dict["w_mu_std"], shape, dtype=dtype, device=device))
-    self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sigma_mean"], self.init_dict["w_sigma_std"], shape, dtype=dtype, device=device))
+    self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sig_mean"], self.init_dict["w_sig_std"], shape, dtype=dtype, device=device))
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
-      self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sigma_mean"], self.init_dict["b_sigma_std"], [self.out_channels], dtype=dtype, device=device))
+      self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
     
 
   def forward(self, x):
     if self.use_bias:
-      new_mean = nn.functional.conv2d(x, self.weight_mu, self.bias_mu, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+      new_mean = nn.functional.conv2d(x, self.weight_mu, self.bias_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       if self.var_type == "exp":
-        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), torch.exp(self.bias_mu / 2), stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), torch.exp(self.bias_mu / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        new_std = nn.functional.conv2d(x, self.weight_sigma, self.bias_sigma, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+        new_std = nn.functional.conv2d(x, self.weight_sigma, self.bias_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
     else:
-      new_mean = nn.funcitonal.conv2d(x, self.weight_mu, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+      new_mean = nn.funcitonal.conv2d(x, self.weight_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       if self.var_type == "exp":
-        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        new_std = nn.functional.conv2d(x, self.weight_sigma, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+        new_std = nn.functional.conv2d(x, self.weight_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
     eps = torch.normal(0, 1, new_mean.shape)
     return new_mean + eps * new_std
 
@@ -158,6 +160,7 @@ class Gaussian_Conv2D(nn.Module):
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
+    super(Gaussian_Conv2D, self).__init__()
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -185,10 +188,10 @@ class Gaussian_Conv2D(nn.Module):
       raise ValueError("in_channels must be divisible by groups")
     shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     self.weight_mu = nn.Parameter(data=torch.normal(self.init_dict["w_mu_mean"], self.init_dict["w_mu_std"], shape, dtype=dtype, device=device))
-    self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sigma_mean"], self.init_dict["w_sigma_std"], shape, dtype=dtype, device=device))
+    self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sig_mean"], self.init_dict["w_sig_std"], shape, dtype=dtype, device=device))
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
-      self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sigma_mean"], self.init_dict["b_sigma_std"], [self.out_channels], dtype=dtype, device=device))
+      self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
     
   def forward(self, x):
     batch_size = x.shape[0]
@@ -204,14 +207,14 @@ class Gaussian_Conv2D(nn.Module):
     for i in range(batch_size):
       xi = torch.unsqueeze(x[i, :, :, :], dim=0)
       # [1, channel, height, width]
-      if self.bias:
-        new_weight = torch.normal(self.weight_mu, weight_std)
-        new_bias = torch.normal(self.bias_mu, bias_std)
-        yi = nn.functional.conv2d(xi, new_weight, new_bias, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+      if self.use_bias:
+        new_weight = torch.normal(self.weight_mu, torch.abs(weight_std))
+        new_bias = torch.normal(self.bias_mu, torch.abs(bias_std))
+        yi = nn.functional.conv2d(xi, new_weight, new_bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
         res.append(yi)
       else:
-        new_weight = torch.normal(self.weight_mu, weight_std)
-        yi = nn.functional.conv2d(xi, new_weight, stride=self.stride, padding=self.padding, dilation=self.padding, groups=self.groups)
+        new_weight = torch.normal(self.weight_mu, torch.abs(weight_std))
+        yi = nn.functional.conv2d(xi, new_weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
         res.append(yi)
     return torch.concat(res, dim=0)
 
@@ -236,6 +239,7 @@ class Dropout_Linear(nn.Module):
                dtype=None,
                init_dict=dict()):
     
+    super(Dropout_Linear, self).__init__()
     k = sqrt(1 / in_features)
     self.init_dict = {"w_mean" : 0, "w_std" : k,
                       "b_mean" : 0, "b_std" : k}
@@ -247,7 +251,6 @@ class Dropout_Linear(nn.Module):
     self.weight = nn.Parameter(data=torch.normal(self.init_dict["w_mean"], self.init_dict["w_std"], [in_features, out_features], dtype=dtype, device=device))
     if self.use_bias:
       self.bias = nn.Parameter(data=torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [out_features], dtype=dtype, device=device))
-    self.bias = bias
     self.dropout_rate = dropout_rate
     if dropout_type != "w" and dropout_type != "f":
       raise ValueError("The dropout_type should be either w(weight) or f(feature).")
@@ -308,6 +311,7 @@ class Dropout_Conv2D(nn.Module):
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
+    super(Dropout_Conv2D, self).__init__()
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -362,13 +366,13 @@ class Dropout_Conv2D(nn.Module):
       return torch.concat(res, dim=0)
     elif self.dropout_type == "f":
       if self.use_bias:
-        output = nn.functional.conv2d(x, new_w, new_b, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        output = nn.functional.conv2d(x, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        output = nn.functional.conv2d(x, new_w, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        output = nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       return Dropout_Conv2D.dropout(output, self.dropout_rate)
     else:
       if self.use_bias:
-        output = nn.functional.conv2d(x, new_w, new_b, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        output = nn.functional.conv2d(x, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        output = nn.functional.conv2d(x, new_w, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        output = nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       return nn.functional.dropout2d(output, self.dropout_rate)
