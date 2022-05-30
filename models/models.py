@@ -27,8 +27,8 @@ class gaussian_residual(nn.Module):
       else:
         self.conv3 = None
 
-    self.bn1 = nn.BatchNorm2d(num_channels)
-    self.bn2 = nn.BatchNorm2d(num_channels)
+    self.bn1 = layers.Gaussian_BatchNorm2D(num_channels, var_type=var_type, init_dict=init_dict)
+    self.bn2 = layers.Gaussian_BatchNorm2D(num_channels, var_type=var_type, init_dict=init_dict)
   
   def forward(self, x):
     y = nn.functional.relu(self.bn1(self.conv1(x)))
@@ -51,14 +51,14 @@ def gaussian_resnet18(var_type, init_dict, is_lrt):
   if is_lrt:
     b1 = nn.Sequential(
       layers.Gaussian_Conv2D_LRT(1, 64, kernel_size=7, stride=2, padding=3, var_type=var_type, init_dict=init_dict),
-      nn.BatchNorm2d(64),
+      layers.Gaussian_BatchNorm2D(64, var_type=var_type, init_dict=init_dict),
       nn.ReLU(),
       nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
     )
   else:
     b1 = nn.Sequential(
       layers.Gaussian_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, var_type=var_type, init_dict=init_dict),
-      nn.BatchNorm2d(64),
+      layers.Gaussian_BatchNorm2D(64, var_type=var_type, init_dict=init_dict),
       nn.ReLU(),
       nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
     )
@@ -83,8 +83,8 @@ class dropout_residual(nn.Module):
     else:
       self.conv3 = None
     
-    self.bn1 = nn.BatchNorm2d(num_channels)
-    self.bn2 = nn.BatchNorm2d(num_channels)
+    self.bn1 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type, init_dict=init_dict)
+    self.bn2 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type, init_dict=init_dict)
   
   def forward(self, x):
     y = nn.functional.relu(self.bn1(self.conv1(x)))
@@ -106,7 +106,7 @@ def dropout_resnet_block(input_channels, num_channels, num_residuals, dropout_ra
 def dropout_resnet18(dropout_rate, dropout_type, init_dict):
   b1 = nn.Sequential(
       layers.Dropout_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict),
-      nn.BatchNorm2d(64),
+      layers.Dropout_BatchNorm2D(64, dropout_rate, dropout_type, init_dict=init_dict),
       nn.ReLU(),
       nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
     )
