@@ -4,6 +4,16 @@ import torch.nn as nn
 from math import sqrt
 
 class Gaussian_Linear(nn.Module):
+  """
+  Implements the Linear layer for BNN.
+  Each W, B are Gaussian random variable, except that, it is equivalent to nn.Linear.
+  This uses Local Reparameterization Trick, which accelerates the computation.
+
+  var_type : Choose the mode for the variance. 
+             "sq"  : variance = sigma^2
+             "exp" : variance = exp(sigma / 2)  (Same to the VAE)
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self, 
               in_features, # Input dimension 
               out_features, # Output dimension
@@ -49,7 +59,16 @@ class Gaussian_Linear(nn.Module):
     return new_mean + eps * new_std
 
 class Gaussian_Conv2D_LRT(nn.Module):
-  
+  """
+  Implements the Conv2d layer for BNN.
+  Each W, B are Gaussian random variable, except that, it is equivalent to nn.Conv2D.
+  This uses Local Reparameterization Trick, which accelerates the computation, but not accurate for Conv2D.
+
+  var_type : Choose the mode for the variance. 
+             "sq"  : variance = sigma^2
+             "exp" : variance = exp(sigma / 2)  (Same to the VAE)
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self,
                in_channels, # Number of input channel
                out_channels, # Number of output channel
@@ -60,7 +79,6 @@ class Gaussian_Conv2D_LRT(nn.Module):
                dilation=1,
                groups=1,
                bias=True,
-               padding_mode='zeros',
                device=None,
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
@@ -77,7 +95,6 @@ class Gaussian_Conv2D_LRT(nn.Module):
     self.padding = padding
     self.dilation = dilation
     self.groups = groups
-    self.padding_mode = padding_mode
     self.var_type = var_type
     self.use_bias = bias
 
@@ -117,7 +134,16 @@ class Gaussian_Conv2D_LRT(nn.Module):
     return new_mean + eps * new_std
 
 class Gaussian_Conv2D(nn.Module):
-  
+  """
+  Implements the Conv2d layer for BNN.
+  Each W, B are Gaussian random variable, except that, it is equivalent to nn.Conv2D.
+  This do not use the Local Reparameterization Trick. It is accurate, but not fast. (It iterates the batch.)
+
+  var_type : Choose the mode for the variance. 
+             "sq"  : variance = sigma^2
+             "exp" : variance = exp(sigma / 2)  (Same to the VAE)
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self,
                in_channels, # Number of input channel
                out_channels, # Number of output channel
@@ -128,7 +154,6 @@ class Gaussian_Conv2D(nn.Module):
                dilation=1,
                groups=1,
                bias=True,
-               padding_mode='zeros',
                device=None,
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
@@ -145,7 +170,6 @@ class Gaussian_Conv2D(nn.Module):
     self.padding = padding
     self.dilation = dilation
     self.groups = groups
-    self.padding_mode = padding_mode
     self.var_type = var_type
     self.use_bias = bias
     
@@ -192,6 +216,16 @@ class Gaussian_Conv2D(nn.Module):
     return torch.concat(res, dim=0)
 
 class Dropout_Linear(nn.Module):
+  """
+  Implements the Linear layer for MC-Dropout.
+  Each W, B are dropouted, except that, it is equivalent to nn.Linear.
+  
+  dropout_rate : The rate of dropout. When 0, no dropout. 
+  dropout_type : Mode of dropout.
+                 "w" : Dropout the weight. It makes computation iteration over batch (slow).
+                 "f" : Dropout the output feature. Faster, and is equivalent to dropping row-wise.
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self,
                in_features,
                out_features,
@@ -247,7 +281,17 @@ class Dropout_Linear(nn.Module):
         return Dropout_Linear.dropout(output, self.dropout_rate)
 
 class Dropout_Conv2D(nn.Module):
+  """
+  Implements the Conv2D layer for MC-Dropout.
+  Each W, B are dropouted, except that, it is equivalent to nn.Conv2D.
   
+  dropout_rate : The rate of dropout. When 0, no dropout. 
+  dropout_type : Mode of dropout.
+                 "w" : Dropout the weight. It makes computation iteration over batch (slow).
+                 "f" : Dropout the output feature. Faster, and is equivalent to dropping row-wise.
+                 "c" : Dropout the output channel. Faster, and is equivalent to droppint all channel weight.
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self,
                in_channels,
                out_channels,
@@ -279,6 +323,7 @@ class Dropout_Conv2D(nn.Module):
     self.use_bias = bias
     self.padding_mode = padding_mode
     self.dropout_rate = dropout_rate
+    self.dropout_type = dropout_type
     if self.dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     k = sqrt(groups / (in_channels * self.kernel_size[0] * self.kernel_size[1]))
