@@ -1,5 +1,7 @@
 # Based on https://d2l.ai/chapter_convolutional-modern/resnet.html
 
+import copy
+from math import sqrt
 import numpy as np
 import torch
 from torch import nn
@@ -176,3 +178,76 @@ class ensemble_resnet18(nn.Module):
     for model in self.models:
       res.append(model(x))
     return res
+
+def resnet18():
+  b1 = nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),
+                     nn.BatchNorm2d(64), nn.ReLU(),
+                     nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+  b2 = nn.Sequential(*resnet_block(64, 64, 2, first_block=True))
+  b3 = nn.Sequential(*resnet_block(64, 128, 2))
+  b4 = nn.Sequential(*resnet_block(128, 256, 2))
+  b5 = nn.Sequential(*resnet_block(256, 512, 2))
+  net = nn.Sequential(b1, b2, b3, b4, b5,
+                      nn.AdaptiveAvgPool2d((1,1)),
+                      nn.Flatten(), nn.Linear(512, 20))
+  return net
+
+def get_swag_parameter(model, train_dataloader, num_samples, frequency, lr, loss_fn, rank):
+  new_model = copy.deepcopy(model)
+  optim = torch.optim.SGD(new_model.parameters(), lr)
+
+  model_mean = dict()
+  model_moment = dict()
+  lowrank_div = []
+  for name, parameter in new_model.named_parameters():
+    model_mean[name] = parameter.detach().clone()
+    model_moment[name] = torch.square(parameter.detach().clone())
+  
+  step_count = 0
+  while True:
+    for data in train_dataloader:
+      step_count += 1
+      
+      images, labels = data
+      optim.zero_grad()
+      outputs = new_model(images)
+
+      loss = loss_fn(outputs, labels)
+      loss.backward()
+
+      optim.step()
+
+      if step_count % frequency == 0:
+        curr_sample = step_count // frequency
+        for name, parameter in new_model.named_parameters():
+          model_mean[name] = (curr_sample * model_mean[name] + parameter.detach().clone()) / (curr_sample + 1)
+          model_moment[name] = (curr_sample * model_moment[name] + torch.square(parameter.detach().clone())) / (curr_sample + 1)
+        
+        if curr_sample > num_samples - rank:
+          deviation = dict()
+          for name, parameter in new_model.named_parameters():
+            deviation[name] = parameter.detach().clone() - model_mean[name]
+          lowrank_div.append(deviation)
+        
+        if curr_sample == num_samples:
+          model_var = dict()
+          for name in model_moment:
+            model_var[name] = model_moment[name] - torch.square(model_mean[name])
+          return model_mean, model_var, lowrank_div
+
+def swag_resnet18_inference(x, model_mean, model_var, lowrank_div, num_sample):
+  res = []
+  rank = len(lowrank_div)
+  for _ in range(num_sample):
+    model = resnet18()
+    state = model.state_dict()
+    for name in model_mean:
+      eps = torch.normal(0,1, model_var[name].shape)
+      new_param = model_mean[name] + torch.sqrt(model_var[name]) * eps / sqrt(2)
+      for k in range(rank):
+        deviation = lowrank_div[k][name]
+        new_param += deviation * torch.normal(0, 1) / sqrt(2 * (rank - 1))
+      state[name] = new_param
+    model.load_state_dict(state)
+    res.append(model(x))
+  return res
