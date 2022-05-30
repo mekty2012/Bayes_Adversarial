@@ -68,7 +68,7 @@ def gaussian_resnet18(var_type, init_dict, is_lrt):
   return nn.Sequential(b1, b2, b3, b4, b5,
                        nn.AdaptiveAvgPool2d((1,1)),
                        nn.Flatten(),
-                       layers.Gaussian_Linear(512, 10, var_type=var_type, init_dict=init_dict))
+                       layers.Gaussian_Linear(512, 20, var_type=var_type, init_dict=init_dict))
 
 class dropout_residual(nn.Module):
   def __init__(self, input_channels, num_channels, dropout_rate, dropout_type, init_dict, use_1x1conv=False, strides=1, **kwargs):
@@ -116,7 +116,7 @@ def dropout_resnet18(dropout_rate, dropout_type, init_dict):
   return nn.Sequential(b1, b2, b3, b4, b5,
                        nn.AdaptiveAvgPool2d((1,1)),
                        nn.Flatten(),
-                       layers.Dropout_Linear(512, 10, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
+                       layers.Dropout_Linear(512, 20, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
 
 class Residual(nn.Module):
   def __init__(self, input_channels, num_channels,
@@ -168,7 +168,7 @@ class ensemble_resnet18(nn.Module):
       b5 = nn.Sequential(*resnet_block(256, 512, 2))
       net = nn.Sequential(b1, b2, b3, b4, b5,
                           nn.AdaptiveAvgPool2d((1,1)),
-                          nn.Flatten(), nn.Linear(512, 10))
+                          nn.Flatten(), nn.Linear(512, 20))
       self.models.append(net)
   
   def forward(self, x):
