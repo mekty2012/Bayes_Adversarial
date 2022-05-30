@@ -46,15 +46,15 @@ class Gaussian_Linear(nn.Module):
     if self.use_bias:
       new_mean = torch.matmul(x, self.weight_mu) + self.bias_mu
       if self.var_type == "exp":
-        new_std = torch.matmul(x, torch.exp(self.weight_sigma / 2)) + torch.exp(self.bias_sigma / 2)
+        new_std = torch.matmul(torch.square(x), torch.exp(self.weight_sigma / 2)) + torch.exp(self.bias_sigma / 2)
       elif self.var_type == "sq":
-        new_std = torch.matmul(x, self.weight_sigma) + self.bias_sigma
+        new_std = torch.matmul(torch.square(x), self.weight_sigma) + self.bias_sigma
     else:
       new_mean = torch.matmul(x, self.weight_mu)
       if self.var_type == "exp":
-        new_std = torch.matmul(x, torch.exp(self.weight_sigma / 2))
+        new_std = torch.matmul(torch.square(x), torch.exp(self.weight_sigma / 2))
       elif self.var_type == "sq":
-        new_std = torch.matmul(x, self.weight_sigma)
+        new_std = torch.matmul(torch.square(x), self.weight_sigma)
     
     eps = torch.normal(0, 1, new_mean.shape)
     return new_mean + eps * new_std
@@ -123,15 +123,15 @@ class Gaussian_Conv2D_LRT(nn.Module):
     if self.use_bias:
       new_mean = nn.functional.conv2d(x, self.weight_mu, self.bias_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       if self.var_type == "exp":
-        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), torch.exp(self.bias_mu / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_std = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma / 2), torch.exp(self.bias_mu / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        new_std = nn.functional.conv2d(x, self.weight_sigma, self.bias_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_std = nn.functional.conv2d(torch.square(x), self.weight_sigma, self.bias_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
     else:
       new_mean = nn.funcitonal.conv2d(x, self.weight_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       if self.var_type == "exp":
-        new_std = nn.functional.conv2d(x, torch.exp(self.weight_sigma / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_std = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma / 2), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
-        new_std = nn.functional.conv2d(x, self.weight_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_std = nn.functional.conv2d(torch.square(x), self.weight_sigma, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
     eps = torch.normal(0, 1, new_mean.shape)
     return new_mean + eps * new_std
 
@@ -217,6 +217,13 @@ class Gaussian_Conv2D(nn.Module):
         yi = nn.functional.conv2d(xi, new_weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
         res.append(yi)
     return torch.concat(res, dim=0)
+
+class Gaussian_BatchNorm2D(nn.Module):
+  """
+  Implements the BatchNorm2D for BNN.
+  The gamma and beta parameters are Gaussians now.
+  """
+
 
 class Dropout_Linear(nn.Module):
   """
