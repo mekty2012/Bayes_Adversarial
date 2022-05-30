@@ -232,12 +232,13 @@ class Gaussian_BatchNorm2D(nn.Module):
                device=None,
                dtype=None,
                init_dict=dict()):
+    super(Gaussian_BatchNorm2D, self).__init__()
     self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
     self.init_dict = {"gamma_mu_mean" : 1, "gamma_mu_std" : 0.1,
                       "gamma_sigma_mean" : 0, "gamma_sigma_std" : 1,
                       "beta_mu_mean" : 0, "beta_mu_std" : 0.1,
                       "beta_sigma_mean" : 0, "beta_sigma_std" : 1}
-    for k, v in init_dict.named_parameters():
+    for k, v in init_dict.items():
       self.init_dict[k] = v
     self.gamma_mu = nn.Parameter(torch.normal(self.init_dict["gamma_mu_mean"], self.init_dict["gamma_mu_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     self.gamma_sigma = nn.Parameter(torch.normal(self.init_dict["gamma_sigma_mean"], self.init_dict["gamma_sigma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
@@ -424,3 +425,53 @@ class Dropout_Conv2D(nn.Module):
       else:
         output = nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       return nn.functional.dropout2d(output, self.dropout_rate)
+
+class Dropout_BatchNorm2D(nn.Module):
+
+  def __init__(self,
+               num_features,
+               dropout_rate,
+               dropout_type,
+               eps=1e-05,
+               momentum=0.1,
+               track_running_stats=True,
+               device=None,
+               dtype=None,
+               init_dict=dict()):
+    super(Dropout_BatchNorm2D, self).__init__()
+    self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
+    self.init_dict = {"gamma_mean" : 1, "gamma_std" : 0,
+                      "beta_mean" : 0, "beta_std" : 0}
+    for k, v in init_dict.items():
+      self.init_dict[k] = v
+    
+    self.gamma = nn.Parameter(torch.normal(self.init_dict["gamma_mean"], self.init_dict["gamma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+    self.beta = nn.Parameter(torch.normal(self.init_dict["beta_mean"], self.init_dict["beta_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+
+    self.dropout_rate = dropout_rate
+    self.dropout_type = dropout_type
+  
+  def dropout(x, p):
+    return x * (torch.rand(x.shape) > p)
+
+  def forward(self, x):
+    batch_size = x.shape[0]
+    num_channel = x.shape[1]
+    height = x.shape[2]
+    width = x.shape[3]
+
+    normed = self.batch_norm(x)
+    if self.dropout_type == "w":
+      res = []
+      gamma = self.gamma.repeat([1, 1, height, width])
+      beta = self.beta.repeat([1, 1, height, width])
+      for i in range(batch_size):
+        xi = torch.unsqueeze(normed[i, :, :, :], 0)
+        yi = xi * Dropout_BatchNorm2D.dropout(gamma) + Dropout_BatchNorm2D.dropout(beta)
+        res.append(yi)
+      return torch.concat(res, 0)
+    else:
+      gamma = self.gamma.repeat([batch_size, 1, height, width])
+      beta = self.beta.repeat([batch_size, 1, height, width])
+      y = normed * gamma + beta
+      return Dropout_BatchNorm2D.dropout(y)
