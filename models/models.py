@@ -136,13 +136,13 @@ class Residual(nn.Module):
     self.bn1 = nn.BatchNorm2d(num_channels)
     self.bn2 = nn.BatchNorm2d(num_channels)
 
-  def forward(self, X):
-    Y = nn.functional.relu(self.bn1(self.conv1(X)))
-    Y = self.bn2(self.conv2(Y))
+  def forward(self, x):
+    y = nn.functional.relu(self.bn1(self.conv1(x)))
+    y = self.bn2(self.conv2(y))
     if self.conv3:
-      X = self.conv3(X)
-    Y += X
-    return nn.functional.relu(Y)
+      x = self.conv3(x)
+    y += x
+    return nn.functional.relu(y)
 
 def resnet_block(input_channels, num_channels, num_residuals,
                  first_block=False):
