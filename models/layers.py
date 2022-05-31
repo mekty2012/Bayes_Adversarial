@@ -467,7 +467,7 @@ class Dropout_BatchNorm2D(nn.Module):
       beta = self.beta.repeat([1, 1, height, width])
       for i in range(batch_size):
         xi = torch.unsqueeze(normed[i, :, :, :], 0)
-        yi = xi * Dropout_BatchNorm2D.dropout(gamma) + Dropout_BatchNorm2D.dropout(beta)
+        yi = xi * Dropout_BatchNorm2D.dropout(gamma, self.dropout_rate) + Dropout_BatchNorm2D.dropout(beta, self.dropout_rate)
         res.append(yi)
       return torch.concat(res, 0)
     else:
