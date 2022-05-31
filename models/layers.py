@@ -474,4 +474,113 @@ class Dropout_BatchNorm2D(nn.Module):
       gamma = self.gamma.repeat([batch_size, 1, height, width])
       beta = self.beta.repeat([batch_size, 1, height, width])
       y = normed * gamma + beta
-      return Dropout_BatchNorm2D.dropout(y)
+      return Dropout_BatchNorm2D.dropout(y, self.dropout_rate)
+
+class BatchEnsemble_Linear(nn.Module):
+
+  def __init__(self, in_features, out_features, is_first, num_models, bias=True, device=None, dtype=None):
+    super().__init__()
+    self.fc = nn.Linear(in_features, out_features, bias=False, device=device, dtype=dtype)
+    self.alpha = nn.Parameter(torch.normal(0, 1, [num_models, in_features], device=device, dtype=dtype))
+    self.gamma = nn.Parameter(torch.normal(0, 1, [num_models, out_features], device=device, dtype=dtype))
+    self.use_bias = bias
+    if self.use_bias:
+      self.bias = nn.Parameter(torch.normal(0, 1, [num_models, out_features], device=device, dtype=dtype))
+    self.is_first = is_first
+    self.num_models = num_models
+    self.in_features = in_features
+    self.out_features = out_features
+
+  def forward(self, x):
+    # The bahavior differs whether it is training or testing.
+    if self.is_first:
+      x = torch.cat([x for _ in range(self.num_models)], dim=0)
+      
+    batch_size = x.shape[0] // self.num_models
+    alpha = torch.cat([self.alpha for _ in range(batch_size)], dim=1).view(-1, self.in_features)
+    gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view(-1, self.out_features)
+    if self.use_bias:
+      bias = torch.cat([self.bias for _ in range(batch_size)], dim=1).view(-1, self.out_features)
+      return self.fc(x * alpha) * gamma + bias
+    else:
+      return self.fc(x * alpha) * gamma
+
+class BatchEnsemble_Conv2D(nn.Module):
+
+  def __init__(self,
+               in_channels,
+               out_channels,
+               kernel_size,
+               stride=1,
+               dilation=1, 
+               padding=0,
+               groups=1,
+               is_first=False,
+               num_models=100,
+               bias=True,
+               device=None,
+               dtype=None):
+    super().__init__()
+    self.is_first = is_first
+    self.use_bias = bias
+    self.num_models = num_models
+    self.in_channels = in_channels
+    self.out_channels = out_channels
+    
+    self.conv2d = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias=False, padding_mode="zeros", device=device, dtype=dtype)
+    self.alpha = nn.Parameter(torch.normal(0, 1, [num_models, in_channels], device=device, dtype=dtype))
+    self.gamma = nn.Parameter(torch.normal(0, 1, [num_models, out_channels], device=device, dtype=dtype))
+    if self.use_bias:
+      self.bias = nn.Parameter(torch.normal(0, 1, [num_models, out_channels], device=device, dtype=dtype))
+  
+  def forward(self, x):
+    if self.is_first:
+      x = torch.cat([x for _ in range(self.num_models)], dim=0)
+
+    height = x.shape[2]
+    width = x.shape[3]  
+    
+    batch_size = x.shape[0] // self.num_models
+    alpha = torch.cat([self.alpha for _ in range(batch_size)], dim=1).view([-1, self.in_channels, 1, 1]).repeat(1, 1, height, width)
+
+    x = self.conv2d(x * alpha)
+
+    new_height = x.shape[2]
+    new_width = x.shape[3]
+
+    gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view([-1, self.out_channels, 1, 1]).repeat(1, 1, new_height, new_width)
+    if self.use_bias:
+      bias = torch.cat([self.bias for _ in range(batch_size)], dim=1).view([-1, self.out_channels, 1, 1]).repeat(1, 1, new_height, new_width)
+      return x * gamma + bias
+    else:
+      return x * gamma
+
+class BatchEnsemble_BatchNorm2D(nn.Module):
+
+  def __init__(self,
+               num_features,
+               num_models,
+               eps=1e-05,
+               momentum=0.1,
+               track_running_stats=True,
+               device=None,
+               dtype=None):
+    super().__init__()
+    self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
+
+    self.num_models = num_models
+    self.num_features = num_features
+    
+    self.gamma = nn.Parameter(torch.ones([self.num_models, self.num_features], device=device, dtype=dtype))
+    self.beta = nn.Parameter(torch.ones([self.num_models, self.num_features], device=device, dtype=dtype))
+    
+  def forward(self, x):
+    batch_size = x.shape[0] // self.num_models
+    normed = self.batch_norm(x)
+    
+    height = x.shape[2]
+    width = x.shape[3]  
+    
+    gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view([-1, self.num_features, 1, 1]).repeat(1, 1, height, width)
+    beta = torch.cat([self.beta for _ in range(batch_size)], dim=1).view([-1, self.num_features, 1, 1]).repeat(1, 1, height, width)
+    return normed * gamma + beta

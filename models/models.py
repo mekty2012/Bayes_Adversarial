@@ -251,3 +251,49 @@ def swag_resnet18_inference(x, model_mean, model_var, lowrank_div, num_sample):
     model.load_state_dict(state)
     res.append(model(x))
   return res
+
+class BatchEnsemble_Residual(nn.Module):
+  def __init__(self, input_channels, num_channels, num_models, use_1x1conv=False, strides=1):
+    super().__init__()
+    self.conv1 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=3, stride=strides,padding=1, num_models=num_models)
+    self.conv2 = layers.BatchEnsemble_Conv2D(num_channels, num_channels, kernel_size=3, padding=1, num_models = num_models)
+
+    if use_1x1conv:
+      self.conv3 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=1, stride=strides, num_models=num_models)
+    else:
+      self.conv3 = None
+    
+    self.bn1 = layers.BatchEnsemble_BatchNorm2D(num_channels, num_models)
+    self.bn2 = layers.BatchEnsemble_BatchNorm2D(num_channels, num_models)
+  
+  def forward(self, x):
+    y = nn.functional.relu(self.bn1(self.conv1(x)))
+    y = self.bn2(self.conv2(y))
+    if self.conv3:
+      x = self.conv3(x)
+    y += x
+    return nn.functional.relu(y)
+
+def batchensemble_resnet_block(input_channels, num_channels, num_residuals, num_models, first_block=False):
+  blk = []
+  for i in range(num_residuals):
+    if i == 0 and not first_block:
+      blk.append(BatchEnsemble_Residual(input_channels, num_channels, use_1x1conv=True, strides=2, num_models=num_models))
+    else:
+      blk.append(BatchEnsemble_Residual(num_channels, num_channels, num_models))
+  return blk
+
+def batchensemble_resnet18(num_models):
+  b1 = nn.Sequential(
+    layers.BatchEnsemble_Conv2D(1, 64, 7, 2, padding=3, is_first=True, num_models=num_models)
+  )
+  b2 = nn.Sequential(*batchensemble_resnet_block(64, 64, 2, num_models, True))
+  b3 = nn.Sequential(*batchensemble_resnet_block(64, 128, 2, num_models))
+  b4 = nn.Sequential(*batchensemble_resnet_block(128, 256, 2, num_models))
+  b5 = nn.Sequential(*batchensemble_resnet_block(256, 512, 2, num_models))
+  net = nn.Sequential(b1, b2, b3, b4, b5,
+                      nn.AdaptiveAvgPool2d((1,1)),
+                      nn.Flatten(),
+                      layers.BatchEnsemble_Linear(512, 20, False, num_models))
+  return net
+  
