@@ -83,8 +83,8 @@ class dropout_residual(nn.Module):
     else:
       self.conv3 = None
     
-    self.bn1 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type, init_dict=init_dict)
-    self.bn2 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type, init_dict=init_dict)
+    self.bn1 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type)
+    self.bn2 = layers.Dropout_BatchNorm2D(num_channels, dropout_rate, dropout_type)
   
   def forward(self, x):
     y = nn.functional.relu(self.bn1(self.conv1(x)))
@@ -106,7 +106,7 @@ def dropout_resnet_block(input_channels, num_channels, num_residuals, dropout_ra
 def dropout_resnet18(dropout_rate, dropout_type, init_dict):
   b1 = nn.Sequential(
       layers.Dropout_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict),
-      layers.Dropout_BatchNorm2D(64, dropout_rate, dropout_type, init_dict=init_dict),
+      layers.Dropout_BatchNorm2D(64, dropout_rate, dropout_type),
       nn.ReLU(),
       nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
     )
@@ -255,11 +255,11 @@ def swag_resnet18_inference(x, model_mean, model_var, lowrank_div, num_sample):
 class BatchEnsemble_Residual(nn.Module):
   def __init__(self, input_channels, num_channels, num_models, use_1x1conv=False, strides=1):
     super().__init__()
-    self.conv1 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=3, stride=strides,padding=1, num_models=num_models)
-    self.conv2 = layers.BatchEnsemble_Conv2D(num_channels, num_channels, kernel_size=3, padding=1, num_models = num_models)
+    self.conv1 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=3, stride=strides,padding=1, num_models=num_models, is_first=False)
+    self.conv2 = layers.BatchEnsemble_Conv2D(num_channels, num_channels, kernel_size=3, padding=1, num_models = num_models, is_first=False)
 
     if use_1x1conv:
-      self.conv3 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=1, stride=strides, num_models=num_models)
+      self.conv3 = layers.BatchEnsemble_Conv2D(input_channels, num_channels, kernel_size=1, stride=strides, num_models=num_models, is_first=False)
     else:
       self.conv3 = None
     
@@ -285,8 +285,10 @@ def batchensemble_resnet_block(input_channels, num_channels, num_residuals, num_
 
 def batchensemble_resnet18(num_models):
   b1 = nn.Sequential(
-    layers.BatchEnsemble_Conv2D(1, 64, 7, 2, padding=3, is_first=True, num_models=num_models)
-  )
+    layers.BatchEnsemble_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, num_models=num_models, is_first=True),
+    layers.BatchEnsemble_BatchNorm2D(64, num_models), 
+    nn.ReLU(),
+    nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
   b2 = nn.Sequential(*batchensemble_resnet_block(64, 64, 2, num_models, True))
   b3 = nn.Sequential(*batchensemble_resnet_block(64, 128, 2, num_models))
   b4 = nn.Sequential(*batchensemble_resnet_block(128, 256, 2, num_models))
@@ -294,6 +296,6 @@ def batchensemble_resnet18(num_models):
   net = nn.Sequential(b1, b2, b3, b4, b5,
                       nn.AdaptiveAvgPool2d((1,1)),
                       nn.Flatten(),
-                      layers.BatchEnsemble_Linear(512, 20, False, num_models))
+                      layers.BatchEnsemble_Linear(512, 20, num_models, is_first=False))
   return net
   

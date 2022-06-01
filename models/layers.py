@@ -464,7 +464,7 @@ class Dropout_Conv2D(nn.Module):
     self.dropout_rate = dropout_rate
 
     # Check the variance type.
-    if self.dropout_type not in ["w", "f", "c"]:
+    if dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type = dropout_type
     
@@ -569,10 +569,10 @@ class Dropout_BatchNorm2D(nn.Module):
     # Define beta_parameter. Init by beta=0. 
     self.beta = nn.Parameter(torch.zeros([1, num_features, 1, 1], device=device, dtype=dtype))
 
-    self.dropout_rate = dropout_rate
     if dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type=dropout_type
+    self.dropout_rate = dropout_rate
   
   def dropout(self, x):
     return x * (torch.rand(x.shape) > self.dropout_rate)
@@ -594,7 +594,7 @@ class Dropout_BatchNorm2D(nn.Module):
       beta = self.beta.repeat([1, 1, height, width])
       for i in range(batch_size):
         xi = torch.unsqueeze(normed[i, :, :, :], 0) # [1, channels, height, width]
-        yi = xi * Dropout_BatchNorm2D.dropout(gamma, self.dropout_rate) + Dropout_BatchNorm2D.dropout(beta, self.dropout_rate) # [1, channels, height, width]
+        yi = xi * self.dropout(gamma) + self.dropout(beta) # [1, channels, height, width]
         res.append(yi)
       return torch.concat(res, 0) # [batch_size, channels, height, width]
     else:
@@ -602,7 +602,7 @@ class Dropout_BatchNorm2D(nn.Module):
       gamma = self.gamma.repeat([batch_size, 1, height, width])
       beta = self.beta.repeat([batch_size, 1, height, width])
       y = normed * gamma + beta # [batch_size, channels, height, width]
-      return Dropout_BatchNorm2D.dropout(y, self.dropout_rate) # [batch_size, channels, height, width]
+      return self.dropout(y) # [batch_size, channels, height, width]
 
 class BatchEnsemble_Linear(nn.Module):
   """
@@ -617,8 +617,8 @@ class BatchEnsemble_Linear(nn.Module):
   def __init__(self, 
                in_features,  # Input dimension 
                out_features,  # Output dimension
-               is_first, # True if its the first layer of model.
                num_models, # Number of ensemble models.
+               is_first, # True if its the first layer of model.
                bias=True, # True if use bias.
                device=None, 
                dtype=None,
@@ -630,7 +630,7 @@ class BatchEnsemble_Linear(nn.Module):
     self.init_dict = {"w_mean" : 0, "w_std" : k,
                       "b_mean" : 0, "b_std" : k,
                       "alpha_mean" : 0, "alpha_std" : 1,
-                      "beta_mean" : 0, "beta_std" : 1}
+                      "gamma_mean" : 0, "gamma_std" : 1}
     # Update with input dictionary.
     for k, v in init_dict.items():
       self.init_dict[k] = v
@@ -689,8 +689,8 @@ class BatchEnsemble_Conv2D(nn.Module):
                in_channels, # Number of input channel. Same as Conv2D.
                out_channels, # Number of output channel. Same as Conv2D.
                kernel_size, # Kernel size. Same as Conv2D.
-               is_first, # True if its the first layer of model.
                num_models, # Number of ensemble models.
+               is_first, # True if its the first layer of model.
                stride=1, # Stride size. Same as Conv2D.
                padding=0, # Padding size. Same as Conv2D. padding mode is not supported.
                dilation=1, # Dilation size. Same as Conv2D.
