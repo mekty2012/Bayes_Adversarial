@@ -349,58 +349,74 @@ class Dropout_Linear(nn.Module):
   init_dict : Initialization mean/variances for the parameters. By default, He init.
   """
   def __init__(self,
-               in_features,
-               out_features,
-               dropout_rate,
-               dropout_type,
-               bias=True,
+               in_features, # Input dimension 
+               out_features, # Output dimension
+               dropout_rate, # The dropout rate. 
+               dropout_type,# Type of dropout. 
+               bias=True, # Use bias or not.
                device=None,
                dtype=None,
-               init_dict=dict()):
-    
+               init_dict=dict() # The dictionary of parameters.
+               ):
     super(Dropout_Linear, self).__init__()
+    
+    # Compute the He init value, and set the dict.
     k = sqrt(1 / in_features)
     self.init_dict = {"w_mean" : 0, "w_std" : k,
                       "b_mean" : 0, "b_std" : k}
+    # Update with input dictionary.
     for k, v in init_dict.items():
       self.init_dict[k] = v
 
     self.use_bias = bias
 
+    # Define weight parameter.
     self.weight = nn.Parameter(data=torch.normal(self.init_dict["w_mean"], self.init_dict["w_std"], [in_features, out_features], dtype=dtype, device=device))
+    
+    # If bias is True, define bias parameters, b_mu, b_sigma.
     if self.use_bias:
       self.bias = nn.Parameter(data=torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [out_features], dtype=dtype, device=device))
+    
+    # Store dropout parameter. 'c' will be translated to 'f'.
     self.dropout_rate = dropout_rate
     if dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type=dropout_type
   
-  def dropout(x, p):
-    return x * (torch.rand(x.shape) > p)
+  def dropout(self, x):
+    return x * (torch.rand(x.shape) > self.dropout_rate)
   
   def forward(self, x):
     if self.dropout_type == "w":
+      # We drop the weights. We will compute it for each elements in batch.
       res = []
       batch_size = x.shape[0]
       for i in range(batch_size):
-        xi = torch.unsqueeze(x[i, :], 0)
+        # i-th input.
+        xi = torch.unsqueeze(x[i, :], 0) # [1, in_features]
+        
         if self.use_bias:
-          new_w = Dropout_Linear.dropout(self.weight, self.dropout_rate)
-          new_b = Dropout_Linear.dropout(self.bias, self.dropout_rate)
-          yi = torch.matmul(xi, new_w) + new_b
+          # Dropout weights, and compute. 
+          # y = dropout(W) * x + dropout(b).
+          new_w = self.dropout(self.weight)
+          new_b = self.dropout(self.bias)
+          yi = torch.matmul(xi, new_w) + new_b # [1, out_features]
           res.append(yi)
         else:
-          new_w = Dropout_Linear.dropout(self.weight, self.dropout_rate)
-          yi = torch.matmul(xi, new_w)
+          # Dropout weights, and compute. 
+          # y = dropout(W) * x.
+          new_w = self.dropout(self.weight)
+          yi = torch.matmul(xi, new_w) # [1, out_features]
           res.append(yi)
-      return torch.concat(res, dim=0)
+      return torch.concat(res, dim=0) # [batch_size, out_features]
     else:
+      # We drop the features. Simply drop the outputs.
       if self.use_bias:
         output = torch.matmul(x, self.weight) + self.bias
-        return Dropout_Linear.dropout(output, self.dropout_rate)
+        return self.dropout(output)
       else:
         output = torch.matmul(x, self.weight)
-        return Dropout_Linear.dropout(output, self.dropout_rate)
+        return self.dropout(output)
 
 class Dropout_Conv2D(nn.Module):
   """
@@ -415,22 +431,23 @@ class Dropout_Conv2D(nn.Module):
   init_dict : Initialization mean/variances for the parameters. By default, He init.
   """
   def __init__(self,
-               in_channels,
-               out_channels,
-               kernel_size,
-               dropout_rate,
-               dropout_type,
-               stride=1,
-               padding=0,
-               dilation=1,
-               groups=1,
-               bias=True,
-               padding_mode='zeros',
-               device=None,
+               in_channels, # Number of input channel. Same as Conv2D.
+               out_channels, # Number of output channel. Same as Conv2D.
+               kernel_size, # Kernel size. Same as Conv2D.
+               dropout_rate, # Dropout Rate.
+               dropout_type, # Mode of dropout.
+               stride=1, # Stride size. Same as Conv2D.
+               padding=0, # Padding size. Same as Conv2D. padding mode is not supported.
+               dilation=1, # Dilation size. Same as Conv2D.
+               groups=1, # Group size. Same as Conv2D.
+               bias=True, # Use bias or not. Same as Conv2D.
+               device=None, 
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
     super(Dropout_Conv2D, self).__init__()
+    
+    # Stores the parameters.
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -444,107 +461,146 @@ class Dropout_Conv2D(nn.Module):
     self.dilation = dilation
     self.groups = groups
     self.use_bias = bias
-    self.padding_mode = padding_mode
     self.dropout_rate = dropout_rate
-    self.dropout_type = dropout_type
+
+    # Check the variance type.
     if self.dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
+    self.dropout_type = dropout_type
+    
+    # Compute the He init parameters.
     k = sqrt(groups / (in_channels * self.kernel_size[0] * self.kernel_size[1]))
+    # Update by the input dict.
     self.init_dict = {"w_mean" : 0, "w_std" : k,
                       "b_mean" : 0, "b_std" : k}
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
+    # Check the group divisibility.
     if self.in_channels % self.groups != 0:
       raise ValueError("in_channels must be divisible by groups")
-    shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     
+    # Define the weight parameter
+    shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     self.weight = nn.Parameter(data=torch.normal(self.init_dict["w_mean"], self.init_dict["w_std"], shape, dtype=dtype, device=device))
     
+    # If use bias, define the bias parameter.
     if self.use_bias:
       self.bias = nn.Parameter(data=torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [out_channels], dtype=dtype, device=device))
 
-  def dropout(x, p):
-    return x * (torch.rand(x.shape) > p)
+  def dropout(self, x):
+    return x * (torch.rand(x.shape) > self.dropout_rate)
 
   def forward(self, x):
     if self.dropout_type == "w":
+      # We drop the weights. We will compute it for each elements in batch.
       res = []
       batch_size = x.shape[0]
       for i in range(batch_size):
-        xi = torch.unsqueeze(x[i, :, :, :], 0)
+        # i-th input.
+        xi = torch.unsqueeze(x[i, :, :, :], 0) # [1, in_channels, height, width]
         if self.use_bias:
-          new_w = Dropout_Conv2D.dropout(self.weight, self.dropout_rate)
-          new_b = Dropout_Conv2D.dropout(self.bias, self.dropout_rate)
-          yi = nn.functional.conv2d(xi, new_w, new_b, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+          # Dropout weights, and compute. 
+          # y = conv(x ; dropout(W)) + dropout(b).
+          new_w = self.dropout(self.weight)
+          new_b = self.dropout(self.bias)
+          yi = nn.functional.conv2d(xi, new_w, new_b, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [1, out_channels, new_height, new_width]
           res.append(yi)
         else:
-          new_w = Dropout_Conv2D.dropout(self.weight, self.dropout_rate)
-          yi = nn.functional.conv2d(xi, new_w, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+          # Dropout weights, and compute. 
+          # y = conv(x ; dropout(W)).
+          new_w = self.dropout(self.weight)
+          yi = nn.functional.conv2d(xi, new_w, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [1, out_channels, new_height, new_width]
           res.append(yi)
-      return torch.concat(res, dim=0)
+      return torch.concat(res, dim=0) # [batch_size, out_channels, new_height, new_width]
     elif self.dropout_type == "f":
+      # We dropout the features, without sharing between channels or pixel positions.
       if self.use_bias:
+        # Compute the output.
+        # y = conv(x; W) + b
         output = nn.functional.conv2d(x, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
+        # Compute the output.
+        # y = conv(x; W)
         output = nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
-      return Dropout_Conv2D.dropout(output, self.dropout_rate)
+      # Compute the dropout.
+      return self.dropout(output)
     else:
+      # We dropout the channels, so all pixels in same channels are dropped together.
       if self.use_bias:
+        # Compute the output.
+        # y = conv(x; W) + b
         output = nn.functional.conv2d(x, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
       else:
+        # Compute the output.
+        # y = conv(x; W)
         output = nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+      # Dropout by channel dropout.
       return nn.functional.dropout2d(output, self.dropout_rate)
 
 class Dropout_BatchNorm2D(nn.Module):
 
   def __init__(self,
-               num_features,
-               dropout_rate,
-               dropout_type,
-               eps=1e-05,
-               momentum=0.1,
-               track_running_stats=True,
+               num_features, # Number of features.
+               dropout_rate, # Dropout rate.
+               dropout_type, # Mode of dropout.
+               eps=1e-05, # Epsilon to prevent the numerical error. Same as BatchNorm2D.
+               momentum=0.1, # Momentum of tracking the statistics. Same as BatchNorm2D.
+               track_running_stats=True, # Whether to track the stats or not. Same as BatchNorm2D.
                device=None,
                dtype=None,
-               init_dict=dict()):
+               init_dict=dict() # The dictionary of parameters.
+               ):
     super(Dropout_BatchNorm2D, self).__init__()
+    
+    # Define its internal BatchNorm. It do not contain gamma, beta parameters.
     self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
+
+    # Define the init parameters.
     self.init_dict = {"gamma_mean" : 1, "gamma_std" : 0,
                       "beta_mean" : 0, "beta_std" : 0}
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
+    # Define gamma parameter. The '1's are added to match the dimension of input.
     self.gamma = nn.Parameter(torch.normal(self.init_dict["gamma_mean"], self.init_dict["gamma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+    # Define beta_parameter. 
     self.beta = nn.Parameter(torch.normal(self.init_dict["beta_mean"], self.init_dict["beta_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
 
     self.dropout_rate = dropout_rate
-    self.dropout_type = dropout_type
+    if dropout_type not in ["w", "f", "c"]:
+      raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
+    self.dropout_type=dropout_type
   
-  def dropout(x, p):
-    return x * (torch.rand(x.shape) > p)
+  def dropout(self, x):
+    return x * (torch.rand(x.shape) > self.dropout_rate)
 
   def forward(self, x):
+    # First get the dimension.
     batch_size = x.shape[0]
     num_channel = x.shape[1]
     height = x.shape[2]
     width = x.shape[3]
 
+    # Compute with internal batch norm.
     normed = self.batch_norm(x)
     if self.dropout_type == "w":
+      # We drop the weights. We should compute for each element in batch.
       res = []
+      # Repeat the parameters to match the size of input.
       gamma = self.gamma.repeat([1, 1, height, width])
       beta = self.beta.repeat([1, 1, height, width])
       for i in range(batch_size):
-        xi = torch.unsqueeze(normed[i, :, :, :], 0)
-        yi = xi * Dropout_BatchNorm2D.dropout(gamma, self.dropout_rate) + Dropout_BatchNorm2D.dropout(beta, self.dropout_rate)
+        xi = torch.unsqueeze(normed[i, :, :, :], 0) # [1, channels, height, width]
+        yi = xi * Dropout_BatchNorm2D.dropout(gamma, self.dropout_rate) + Dropout_BatchNorm2D.dropout(beta, self.dropout_rate) # [1, channels, height, width]
         res.append(yi)
-      return torch.concat(res, 0)
+      return torch.concat(res, 0) # [batch_size, channels, height, width]
     else:
+      # Repeat the parameters to match the size of input.
       gamma = self.gamma.repeat([batch_size, 1, height, width])
       beta = self.beta.repeat([batch_size, 1, height, width])
-      y = normed * gamma + beta
-      return Dropout_BatchNorm2D.dropout(y, self.dropout_rate)
+      y = normed * gamma + beta # [batch_size, channels, height, width]
+      return Dropout_BatchNorm2D.dropout(y, self.dropout_rate) # [batch_size, channels, height, width]
 
 class BatchEnsemble_Linear(nn.Module):
 
