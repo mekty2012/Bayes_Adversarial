@@ -297,11 +297,11 @@ class Gaussian_BatchNorm2D(nn.Module):
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
-    # Define gamma parameters, gamma_mu, gamma_sigma.
+    # Define gamma parameters, gamma_mu, gamma_sigma. The '1's are added to match the dimension of input.
     self.gamma_mu = nn.Parameter(torch.normal(self.init_dict["gamma_mu_mean"], self.init_dict["gamma_mu_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     self.gamma_sigma = nn.Parameter(torch.normal(self.init_dict["gamma_sigma_mean"], self.init_dict["gamma_sigma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     
-    # Define beta_parameters, beta_mu, beta_sigma. The '1's are added to match the dimension of input.
+    # Define beta_parameters, beta_mu, beta_sigma. 
     self.beta_mu = nn.Parameter(torch.normal(self.init_dict["beta_mu_mean"], self.init_dict["beta_mu_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     self.beta_sigma = nn.Parameter(torch.normal(self.init_dict["beta_sigma_mean"], self.init_dict["beta_sigma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     
