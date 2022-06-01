@@ -539,7 +539,16 @@ class Dropout_Conv2D(nn.Module):
       return nn.functional.dropout2d(output, self.dropout_rate)
 
 class Dropout_BatchNorm2D(nn.Module):
+  """
+  Implements the BatchNorm2D for MC-dropout.
+  Gamma, Beta can be dropouted, except that, it is equivalent to nn.BatchNorm2D.
 
+  dropout_rate : The rate of dropout. When 0, no dropout. 
+  dropout_type : Mode of dropout.
+                 "w" : Dropout the weight. It makes computation iteration over batch (slow).
+                 "f" : Dropout the output feature. Faster, and is equivalent to dropping row-wise.
+                 "c" : Dropout the output channel. Faster, and is equivalent to droppint all channel weight.
+  """
   def __init__(self,
                num_features, # Number of features.
                dropout_rate, # Dropout rate.
@@ -549,23 +558,16 @@ class Dropout_BatchNorm2D(nn.Module):
                track_running_stats=True, # Whether to track the stats or not. Same as BatchNorm2D.
                device=None,
                dtype=None,
-               init_dict=dict() # The dictionary of parameters.
                ):
     super(Dropout_BatchNorm2D, self).__init__()
     
     # Define its internal BatchNorm. It do not contain gamma, beta parameters.
     self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
 
-    # Define the init parameters.
-    self.init_dict = {"gamma_mean" : 1, "gamma_std" : 0,
-                      "beta_mean" : 0, "beta_std" : 0}
-    for k, v in init_dict.items():
-      self.init_dict[k] = v
-    
-    # Define gamma parameter. The '1's are added to match the dimension of input.
-    self.gamma = nn.Parameter(torch.normal(self.init_dict["gamma_mean"], self.init_dict["gamma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
-    # Define beta_parameter. 
-    self.beta = nn.Parameter(torch.normal(self.init_dict["beta_mean"], self.init_dict["beta_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+    # Define gamma parameter. The '1's are added to match the dimension of input. Init by gamma=1.
+    self.gamma = nn.Parameter(torch.ones([1, num_features, 1, 1], device=device, dtype=dtype))
+    # Define beta_parameter. Init by beta=0. 
+    self.beta = nn.Parameter(torch.zeros([1, num_features, 1, 1], device=device, dtype=dtype))
 
     self.dropout_rate = dropout_rate
     if dropout_type not in ["w", "f", "c"]:
@@ -603,110 +605,211 @@ class Dropout_BatchNorm2D(nn.Module):
       return Dropout_BatchNorm2D.dropout(y, self.dropout_rate) # [batch_size, channels, height, width]
 
 class BatchEnsemble_Linear(nn.Module):
+  """
+  Implements the Linear layer for batch ensemble.
+  W contains two additional parameter alpha, gamma, for each models, so we have each models have weight
+  W * (alpha gamma^T).
+  We use ensemble for bias.
 
-  def __init__(self, in_features, out_features, is_first, num_models, bias=True, device=None, dtype=None):
-    super().__init__()
+  num_models : Number of ensemble models. 
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
+  def __init__(self, 
+               in_features,  # Input dimension 
+               out_features,  # Output dimension
+               is_first, # True if its the first layer of model.
+               num_models, # Number of ensemble models.
+               bias=True, # True if use bias.
+               device=None, 
+               dtype=None,
+               init_dict=dict(), # The dictionary of parameters.
+               ):
+    super(BatchEnsemble_Linear, self).__init__()
+    
+    k = sqrt(1 / in_features)
+    self.init_dict = {"w_mean" : 0, "w_std" : k,
+                      "b_mean" : 0, "b_std" : k,
+                      "alpha_mean" : 0, "alpha_std" : 1,
+                      "beta_mean" : 0, "beta_std" : 1}
+    # Update with input dictionary.
+    for k, v in init_dict.items():
+      self.init_dict[k] = v
+
+    # Define internal Linear layer, without bias.
     self.fc = nn.Linear(in_features, out_features, bias=False, device=device, dtype=dtype)
-    self.alpha = nn.Parameter(torch.normal(0, 1, [num_models, in_features], device=device, dtype=dtype))
-    self.gamma = nn.Parameter(torch.normal(0, 1, [num_models, out_features], device=device, dtype=dtype))
+    nn.init.normal_(self.fc.weight, mean=self.init_dict["w_mean"], std=self.init_dict["w_std"])
+
+    # Define batch ensemble parameters.
+    self.alpha = nn.Parameter(torch.normal(self.init_dict["alpha_mean"], self.init_dict["alpha_std"], [num_models, in_features], device=device, dtype=dtype))
+    self.gamma = nn.Parameter(torch.normal(self.init_dict["gamma_mean"], self.init_dict["gamma_std"], [num_models, out_features], device=device, dtype=dtype))
     self.use_bias = bias
     if self.use_bias:
-      self.bias = nn.Parameter(torch.normal(0, 1, [num_models, out_features], device=device, dtype=dtype))
+      self.bias = nn.Parameter(torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [num_models, out_features], device=device, dtype=dtype))
+    
+    # Store parameters
     self.is_first = is_first
     self.num_models = num_models
     self.in_features = in_features
     self.out_features = out_features
 
   def forward(self, x):
-    # The bahavior differs whether it is training or testing.
+    # If it is first layer, duplicate the input to [batch_size * num_models, in_features]
+    # The form is [x1, x2, ..., xN, x1, x2, ..., xN, ..., x1, x2, ..., xN]
     if self.is_first:
       x = torch.cat([x for _ in range(self.num_models)], dim=0)
-      
+    
+    # Get the 'real' batch_size
     batch_size = x.shape[0] // self.num_models
-    alpha = torch.cat([self.alpha for _ in range(batch_size)], dim=1).view(-1, self.in_features)
-    gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view(-1, self.out_features)
+    
+    # Repeat alpha, beta, bias.
+    # The form is [a1, a1, ..., a1, a2, a2, ..., a2, ..., ad, ad, ..., ad]
+    alpha = torch.cat([self.alpha for _ in range(batch_size)], dim=1).view(-1, self.in_features) # [batch_size * num_models, in_features]
+    gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view(-1, self.out_features) # [batch_size * num_models, out_features]
     if self.use_bias:
-      bias = torch.cat([self.bias for _ in range(batch_size)], dim=1).view(-1, self.out_features)
-      return self.fc(x * alpha) * gamma + bias
+      bias = torch.cat([self.bias for _ in range(batch_size)], dim=1).view(-1, self.out_features) # [batch_size * num_models, out_features]
+      # Return output.
+      # y_i = W * (x * alpha_i) * gamma_i + b_i
+      return self.fc(x * alpha) * gamma + bias # [batch_size * num_models, out_features]
     else:
-      return self.fc(x * alpha) * gamma
+      # Return output.
+      # y_i = W * (x * alpha_i) * gamma_i
+      return self.fc(x * alpha) * gamma # [batch_size * num_models, out_features]
 
 class BatchEnsemble_Conv2D(nn.Module):
+  """
+  Implements the Conv2D layer for batch ensemble.
+  W contains two additional parameter alpha, gamma, for each models, so we have each models have weight
+  W * (alpha gamma^T).
+  We use ensemble for bias.
 
+  num_models : Number of ensemble models. 
+  init_dict : Initialization mean/variances for the parameters. By default, He init.
+  """
   def __init__(self,
-               in_channels,
-               out_channels,
-               kernel_size,
-               stride=1,
-               dilation=1, 
-               padding=0,
-               groups=1,
-               is_first=False,
-               num_models=100,
-               bias=True,
-               device=None,
-               dtype=None):
+               in_channels, # Number of input channel. Same as Conv2D.
+               out_channels, # Number of output channel. Same as Conv2D.
+               kernel_size, # Kernel size. Same as Conv2D.
+               is_first, # True if its the first layer of model.
+               num_models, # Number of ensemble models.
+               stride=1, # Stride size. Same as Conv2D.
+               padding=0, # Padding size. Same as Conv2D. padding mode is not supported.
+               dilation=1, # Dilation size. Same as Conv2D.
+               groups=1, # Group size. Same as Conv2D.
+               bias=True, # Use bias or not. Same as Conv2D.
+               device=None, 
+               dtype=None,
+               init_dict = dict() # The dictionary of parameters.
+               ):
     super().__init__()
+    
+    # Store the parameters
     self.is_first = is_first
     self.use_bias = bias
     self.num_models = num_models
     self.in_channels = in_channels
     self.out_channels = out_channels
+    if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
+      self.kernel_size = kernel_size
+    elif isinstance(kernel_size, tuple):
+      self.kernel_size = (kernel_size[0], kernel_size[0])
+    else:
+      self.kernel_size = (kernel_size, kernel_size)
+
+    # Define internal conv2d layer.
+    self.conv2d = nn.Conv2d(in_channels, out_channels, self.kernel_size, stride, padding, dilation, groups, bias=False, padding_mode="zeros", device=device, dtype=dtype)
+
+    # Compute the He init parameters.
+    k = sqrt(groups / (in_channels * self.kernel_size[0] * self.kernel_size[1]))
+    self.init_dict = {"w_mean" : 0, "w_std" : k,
+                      "b_mean" : 0, "b_std" : k,
+                      "alpha_mean" : 0, "alpha_std" : 1,
+                      "gamma_mean" : 0, "gamma_std" : 1}
+    for k, v in init_dict.items():
+      self.init_dict[k] = v
     
-    self.conv2d = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias=False, padding_mode="zeros", device=device, dtype=dtype)
-    self.alpha = nn.Parameter(torch.normal(0, 1, [num_models, in_channels], device=device, dtype=dtype))
-    self.gamma = nn.Parameter(torch.normal(0, 1, [num_models, out_channels], device=device, dtype=dtype))
+    # Reset the conv2d weight.
+    nn.init.normal_(self.conv2d.weight, self.init_dict["w_mean"], self.init_dict["w_std"])
+
+    # Define batch ensemble parameters.
+    self.alpha = nn.Parameter(torch.normal(self.init_dict["alpha_mean"], self.init_dict["alpha_std"], [num_models, in_channels], device=device, dtype=dtype))
+    self.gamma = nn.Parameter(torch.normal(self.init_dict["gamma_mean"], self.init_dict["gamma_std"], [num_models, out_channels], device=device, dtype=dtype))
     if self.use_bias:
-      self.bias = nn.Parameter(torch.normal(0, 1, [num_models, out_channels], device=device, dtype=dtype))
+      self.bias = nn.Parameter(torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [num_models, out_channels], device=device, dtype=dtype))
   
   def forward(self, x):
+    # If it is first layer, duplicate the input to [batch_size * num_models, in_features]
+    # The form is [x1, x2, ..., xN, x1, x2, ..., xN, ..., x1, x2, ..., xN]
     if self.is_first:
       x = torch.cat([x for _ in range(self.num_models)], dim=0)
 
-    height = x.shape[2]
-    width = x.shape[3]  
-    
     batch_size = x.shape[0] // self.num_models
+    height = x.shape[2]
+    width = x.shape[3]
+    
+    # Repeat alpha.
+    # The form is [a1, a1, ..., a1, a2, a2, ..., a2, ..., ad, ad, ..., ad]
     alpha = torch.cat([self.alpha for _ in range(batch_size)], dim=1).view([-1, self.in_channels, 1, 1]).repeat(1, 1, height, width)
 
+    # Compute the result of conv2d.
     x = self.conv2d(x * alpha)
 
+    # Get new height and width after convolution.
     new_height = x.shape[2]
     new_width = x.shape[3]
 
+    # Repeat gamma and bias with new height and width.
     gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view([-1, self.out_channels, 1, 1]).repeat(1, 1, new_height, new_width)
     if self.use_bias:
       bias = torch.cat([self.bias for _ in range(batch_size)], dim=1).view([-1, self.out_channels, 1, 1]).repeat(1, 1, new_height, new_width)
-      return x * gamma + bias
+      # Return output.
+      # y_i = conv2d(x * alpha_i, W) * gamma_i + beta_i
+      return x * gamma + bias # [batch_size * num_models, out_channels, new_height, new_widths]
     else:
-      return x * gamma
+      # Return output.
+      # y_i = conv2d(x * alpha_i, W) * gamma_i
+      return x * gamma # [batch_size * num_models, out_channels, new_height, new_widths]
 
 class BatchEnsemble_BatchNorm2D(nn.Module):
+  """
+  Implements the BatchNorm2D layer for batch ensemble.
+  We use naive ensemble for here.
 
+  num_models : Number of ensemble models. 
+  """
   def __init__(self,
-               num_features,
-               num_models,
-               eps=1e-05,
-               momentum=0.1,
-               track_running_stats=True,
+               num_features, # Number of features.
+               num_models, # Number of ensemble models.
+               eps=1e-05, # Epsilon to prevent the numerical error. Same as BatchNorm2D.
+               momentum=0.1, # Momentum of tracking the statistics. Same as BatchNorm2D.
+               track_running_stats=True, # Whether to track the stats or not. Same as BatchNorm2D.
                device=None,
-               dtype=None):
+               dtype=None,
+               ):
     super().__init__()
+
+    # Define its internal BatchNorm. It do not contain gamma, beta parameters.
     self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
 
+    # Store the parameters.
     self.num_models = num_models
     self.num_features = num_features
     
+    # Define parameters. We use initialization of gamma=1, beta=0.
     self.gamma = nn.Parameter(torch.ones([self.num_models, self.num_features], device=device, dtype=dtype))
-    self.beta = nn.Parameter(torch.ones([self.num_models, self.num_features], device=device, dtype=dtype))
+    self.beta = nn.Parameter(torch.zeros([self.num_models, self.num_features], device=device, dtype=dtype))
     
   def forward(self, x):
+    # First get the dimension.
     batch_size = x.shape[0] // self.num_models
-    normed = self.batch_norm(x)
-    
     height = x.shape[2]
     width = x.shape[3]  
     
+    # Compute with internal batch norm.
+    normed = self.batch_norm(x)
+    
+    # Repeat the gamma and beta to match the size of input.
+    # The form is [a1, a1, ..., a1, a2, a2, ..., a2, ..., ad, ad, ..., ad]
     gamma = torch.cat([self.gamma for _ in range(batch_size)], dim=1).view([-1, self.num_features, 1, 1]).repeat(1, 1, height, width)
     beta = torch.cat([self.beta for _ in range(batch_size)], dim=1).view([-1, self.num_features, 1, 1]).repeat(1, 1, height, width)
+    # Return y_i = batchnorm(x) * gamma_i + beta_i.
     return normed * gamma + beta
