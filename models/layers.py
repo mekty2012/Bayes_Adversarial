@@ -15,49 +15,63 @@ class Gaussian_Linear(nn.Module):
   init_dict : Initialization mean/variances for the parameters. By default, He init.
   """
   def __init__(self, 
-              in_features, # Input dimension 
-              out_features, # Output dimension
-              var_type, # Variance model. Use square(sigma) or exp(sigma).
-              bias=True, # Use bias or not.
-              device=None, # Device of layer.
-              dtype=None, # Datatype of layer.
-              init_dict=dict() # The dictionary of parameters.
-              ):
+               in_features, # Input dimension 
+               out_features, # Output dimension
+               var_type, # Variance model. Use square(sigma) or exp(sigma).
+               bias=True, # Use bias or not.
+               device=None, # Device of layer.
+               dtype=None, # Datatype of layer.
+               init_dict=dict() # The dictionary of parameters.
+               ):
     super(Gaussian_Linear, self).__init__()
+    
+    # Compute the He init value, and set the dict.
     k = sqrt(1 / in_features)
     self.init_dict = {"w_mu_mean" : 0,  "w_mu_std" : k, 
                       "w_sig_mean" : 0, "w_sig_std" : k, 
                       "b_mu_mean" : 0,  "b_mu_std" : k, 
                       "b_sig_mean" : 0, "b_sig_std" : k}
+    # Update with input dictionary.
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
     self.use_bias = bias
+    
+    # Define weight parameters, w_mu, w_sigma.
     self.weight_mu = nn.Parameter(data=torch.normal(self.init_dict["w_mu_mean"], self.init_dict["w_mu_std"], [in_features, out_features], dtype=dtype, device=device))
     self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sig_mean"], self.init_dict["w_sig_std"], [in_features, out_features], dtype=dtype, device=device))
+
+    # If bias is True, define bias parameters, b_mu, b_sigma.
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [out_features], dtype=dtype, device=device))
       self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [out_features], dtype=dtype, device=device))
+    
+    # Check the variance type.
     if var_type != "exp" and var_type != "sq":
       raise ValueError("The variance mode should be exp or sq.")
     self.var_type = var_type
     
   def forward(self, x):
-    if self.use_bias:
-      new_mean = torch.matmul(x, self.weight_mu) + self.bias_mu
+    if self.use_bias: # Bias is True
+      # Compute mean of output, m = W_mu x + b_mu
+      new_mean = torch.matmul(x, self.weight_mu) + self.bias_mu # [batch_size, out_features]
+      # Compute variance of output, v = W_var X + b_var
       if self.var_type == "exp":
-        new_var = torch.matmul(torch.square(x), torch.exp(self.weight_sigma)) + torch.exp(self.bias_sigma)
+        new_var = torch.matmul(torch.square(x), torch.exp(self.weight_sigma)) + torch.exp(self.bias_sigma) # [batch_size, out_features]
       elif self.var_type == "sq":
-        new_var = torch.matmul(torch.square(x), torch.square(self.weight_sigma)) + torch.square(self.bias_sigma)
+        new_var = torch.matmul(torch.square(x), torch.square(self.weight_sigma)) + torch.square(self.bias_sigma) # [batch_size, out_features]
     else:
-      new_mean = torch.matmul(x, self.weight_mu)
+      # Compute mean of output, m = W_mu x + b_mu
+      new_mean = torch.matmul(x, self.weight_mu) # [batch_size, out_features]
+      # Compute variance of output, v = W_var X + b_var
       if self.var_type == "exp":
-        new_var = torch.matmul(torch.square(x), torch.exp(self.weight_sigma))
+        new_var = torch.matmul(torch.square(x), torch.exp(self.weight_sigma)) # [batch_size, out_features]
       elif self.var_type == "sq":
-        new_var = torch.matmul(torch.square(x), torch.square(self.weight_sigma))
+        new_var = torch.matmul(torch.square(x), torch.square(self.weight_sigma)) # [batch_size, out_features]
     
-    eps = torch.normal(0, 1, new_mean.shape)
-    return new_mean + eps * torch.sqrt(new_var)
+    # Reparameterization
+    eps = torch.normal(0, 1, new_mean.shape) # [batch_size, out_features]
+    return new_mean + eps * torch.sqrt(new_var) # [batch_size, out_features]
 
 class Gaussian_Conv2D_LRT(nn.Module):
   """
@@ -71,20 +85,22 @@ class Gaussian_Conv2D_LRT(nn.Module):
   init_dict : Initialization mean/variances for the parameters. By default, He init.
   """
   def __init__(self,
-               in_channels, # Number of input channel
-               out_channels, # Number of output channel
-               kernel_size, 
-               var_type, 
-               stride=1,
-               padding=0,
-               dilation=1,
-               groups=1,
-               bias=True,
-               device=None,
+               in_channels, # Number of input channel. Same as Conv2D.
+               out_channels, # Number of output channel. Same as Conv2D.
+               kernel_size, # Kernel size. Same as Conv2D.
+               var_type, # Type of variance mode.
+               stride=1, # Stride size. Same as Conv2D.
+               padding=0, # Padding size. Same as Conv2D. padding mode is not supported.
+               dilation=1, # Dilation size. Same as Conv2D.
+               groups=1, # Group size. Same as Conv2D.
+               bias=True, # Use bias or not. Same as Conv2D.
+               device=None, 
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
     super(Gaussian_Conv2D_LRT, self).__init__()
+    
+    # Stores the parameters.
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -97,23 +113,33 @@ class Gaussian_Conv2D_LRT(nn.Module):
     self.padding = padding
     self.dilation = dilation
     self.groups = groups
-    self.var_type = var_type
     self.use_bias = bias
 
+    # Check the variance type.
+    if var_type != "exp" and var_type != "sq":
+      raise ValueError("The variance mode should be exp or sq.")
+    self.var_type = var_type
+
+    # Compute the He init parameter.
     k = sqrt(groups / (in_channels * self.kernel_size[0] * self.kernel_size[1]))
     self.init_dict = {"w_mu_mean" : 0,  "w_mu_std" : k, 
                       "w_sig_mean" : 0, "w_sig_std" : k, 
                       "b_mu_mean" : 0,  "b_mu_std" : k, 
                       "b_sig_mean" : 0, "b_sig_std" : k}
+    # Update by the input dict.
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
-
+    # Check the group divisibility.
     if self.in_channels % self.groups != 0:
       raise ValueError("in_channels must be divisible by groups")
+    
+    # Define the weight parameters, w_mu, w_sigma.
     shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     self.weight_mu = nn.Parameter(data=torch.normal(self.init_dict["w_mu_mean"], self.init_dict["w_mu_std"], shape, dtype=dtype, device=device))
     self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sig_mean"], self.init_dict["w_sig_std"], shape, dtype=dtype, device=device))
+    
+    # If use bias, define the bias parameters, b_mu, b_sigma.
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
       self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
@@ -121,19 +147,25 @@ class Gaussian_Conv2D_LRT(nn.Module):
 
   def forward(self, x):
     if self.use_bias:
-      new_mean = nn.functional.conv2d(x, self.weight_mu, self.bias_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+      # Define the output mean, m = conv(x ; W_mu) + b_mu.
+      new_mean = nn.functional.conv2d(x, self.weight_mu, self.bias_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
+      # Define the output variance, V = conv(x ; W_var) + b_var
       if self.var_type == "exp":
-        new_var = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma), torch.exp(self.bias_mu), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_var = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma), torch.exp(self.bias_mu), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
       else:
-        new_var = nn.functional.conv2d(torch.square(x), torch.square(self.weight_sigma), torch.square(self.bias_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_var = nn.functional.conv2d(torch.square(x), torch.square(self.weight_sigma), torch.square(self.bias_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
     else:
-      new_mean = nn.funcitonal.conv2d(x, self.weight_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+      # Define the output mean, m = conv(x ; W_mu) + b_mu.
+      new_mean = nn.funcitonal.conv2d(x, self.weight_mu, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
+      # Define the output variance, V = conv(x ; W_var) + b_var
       if self.var_type == "exp":
-        new_var = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        new_var = nn.functional.conv2d(torch.square(x), torch.exp(self.weight_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
       else:
-        new_var = nn.functional.conv2d(torch.square(x), torch.square(self.weight_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
-    eps = torch.normal(0, 1, new_mean.shape)
-    return new_mean + eps * torch.sqrt(new_var)
+        new_var = nn.functional.conv2d(torch.square(x), torch.square(self.weight_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
+
+    # (Local) Reparameterization trick
+    eps = torch.normal(0, 1, new_mean.shape) # [batch_size, out_channels, new_height, new_width]
+    return new_mean + eps * torch.sqrt(new_var) # [batch_size, out_channels, new_height, new_width]
 
 class Gaussian_Conv2D(nn.Module):
   """
@@ -147,20 +179,22 @@ class Gaussian_Conv2D(nn.Module):
   init_dict : Initialization mean/variances for the parameters. By default, He init.
   """
   def __init__(self,
-               in_channels, # Number of input channel
-               out_channels, # Number of output channel
-               kernel_size, 
-               var_type, 
-               stride=1,
-               padding=0,
-               dilation=1,
-               groups=1,
-               bias=True,
+               in_channels, # Number of input channel. Same as Conv2D.
+               out_channels, # Number of output channel. Same as Conv2D.
+               kernel_size, # Kernel size. Same as Conv2D.
+               var_type, # Type of variance mode.
+               stride=1, # Stride size. Same as Conv2D.
+               padding=0, # Padding size. Same as Conv2D. padding mode is not supported.
+               dilation=1, # Dilation size. Same as Conv2D.
+               groups=1, # Group size. Same as Conv2D.
+               bias=True, # Use bias or not. Same as Conv2D.
                device=None,
                dtype=None,
                init_dict=dict() # The dictionary of parameters.
                ):
     super(Gaussian_Conv2D, self).__init__()
+
+    # Stores the parameters.
     self.in_channels = in_channels
     self.out_channels = out_channels
     if isinstance(kernel_size, tuple) and len(kernel_size) >= 2:
@@ -176,26 +210,36 @@ class Gaussian_Conv2D(nn.Module):
     self.var_type = var_type
     self.use_bias = bias
     
+    # Compute the He init parameter.
     k = sqrt(groups / (in_channels * self.kernel_size[0] * self.kernel_size[1]))
     self.init_dict = {"w_mu_mean" : 0,  "w_mu_std" : k, 
                       "w_sig_mean" : 0, "w_sig_std" : k, 
                       "b_mu_mean" : 0,  "b_mu_std" : k, 
                       "b_sig_mean" : 0, "b_sig_std" : k}
+    # Update by the input dict.
     for k, v in init_dict.items():
       self.init_dict[k] = v
     
+    # Check the group divisibility.
     if self.in_channels % self.groups != 0:
       raise ValueError("in_channels must be divisible by groups")
+    
+    # Define the weight parameters, w_mu, w_sigma.
     shape = [self.out_channels, self.in_channels // self.groups, self.kernel_size[0], self.kernel_size[1]]
     self.weight_mu = nn.Parameter(data=torch.normal(self.init_dict["w_mu_mean"], self.init_dict["w_mu_std"], shape, dtype=dtype, device=device))
     self.weight_sigma = nn.Parameter(data=torch.normal(self.init_dict["w_sig_mean"], self.init_dict["w_sig_std"], shape, dtype=dtype, device=device))
+    
+    # If use bias, define the bias parameters, b_mu, b_sigma.
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
       self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
     
   def forward(self, x):
+    # This time, we iterate for each samples in minibatch.
     batch_size = x.shape[0]
     res = []
+
+    # Pre-compute the std of weight.
     if self.var_type == "exp":
       weight_std = torch.exp(self.weight_sigma / 2)
       if self.use_bias:
@@ -205,18 +249,25 @@ class Gaussian_Conv2D(nn.Module):
       if self.use_bias:
         bias_std = self.bias_sigma
     for i in range(batch_size):
-      xi = torch.unsqueeze(x[i, :, :, :], dim=0)
-      # [1, channel, height, width]
+      # Get i-th input.
+      xi = torch.unsqueeze(x[i, :, :, :], dim=0) # [1, channel, height, width]
       if self.use_bias:
-        new_weight = torch.normal(self.weight_mu, torch.abs(weight_std))
-        new_bias = torch.normal(self.bias_mu, torch.abs(bias_std))
-        yi = nn.functional.conv2d(xi, new_weight, new_bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        # Sample weights, with reparameterization.
+        w_eps = torch.normal(0, 1, self.weight_mu.shape)
+        b_eps = torch.normal(0, 1, self.bias_mu.shape)
+        new_weight = self.weight_mu + w_eps * torch.abs(weight_std)
+        new_bias = self.bias_mu + b_eps * torch.abs(bias_std)
+        
+        # Compute the i-th output, and store.
+        yi = nn.functional.conv2d(xi, new_weight, new_bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [1, out_channel, new_height, new_width]
         res.append(yi)
       else:
+        # Sample weights, with reparameterization.
         new_weight = torch.normal(self.weight_mu, torch.abs(weight_std))
+        # Compute the i-th output, and store.
         yi = nn.functional.conv2d(xi, new_weight, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
-        res.append(yi)
-    return torch.concat(res, dim=0)
+        res.append(yi) # [1, out_channel, new_height, new_width]
+    return torch.concat(res, dim=0) # [batch_size, out_channel, new_height, new_width]
 
 class Gaussian_BatchNorm2D(nn.Module):
   """
@@ -224,46 +275,65 @@ class Gaussian_BatchNorm2D(nn.Module):
   The gamma and beta parameters are Gaussians now.
   """
   def __init__(self,
-               num_features,
-               var_type, 
-               eps=1e-05,
-               momentum=0.1,
-               track_running_stats=True,
+               num_features, # Number of features.
+               var_type, # Type of variances.
+               eps=1e-05, # Epsilon to prevent the numerical error. Same as BatchNorm2D.
+               momentum=0.1, # Momentum of tracking the statistics. Same as BatchNorm2D.
+               track_running_stats=True, # Whether to track the stats or not. Same as BatchNorm2D.
                device=None,
                dtype=None,
-               init_dict=dict()):
+               init_dict=dict() # The dictionary of parameters.
+               ):
     super(Gaussian_BatchNorm2D, self).__init__()
+    
+    # Define its internal BatchNorm. It do not contain gamma, beta parameters.
     self.batch_norm = nn.BatchNorm2d(num_features, eps, momentum, affine=False, track_running_stats=track_running_stats, device=device, dtype=dtype)
+    
+    # Define the init parameters.
     self.init_dict = {"gamma_mu_mean" : 1, "gamma_mu_std" : 0.1,
                       "gamma_sigma_mean" : 0, "gamma_sigma_std" : 1,
                       "beta_mu_mean" : 0, "beta_mu_std" : 0.1,
                       "beta_sigma_mean" : 0, "beta_sigma_std" : 1}
     for k, v in init_dict.items():
       self.init_dict[k] = v
+    
+    # Define gamma parameters, gamma_mu, gamma_sigma.
     self.gamma_mu = nn.Parameter(torch.normal(self.init_dict["gamma_mu_mean"], self.init_dict["gamma_mu_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     self.gamma_sigma = nn.Parameter(torch.normal(self.init_dict["gamma_sigma_mean"], self.init_dict["gamma_sigma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+    
+    # Define beta_parameters, beta_mu, beta_sigma. The '1's are added to match the dimension of input.
     self.beta_mu = nn.Parameter(torch.normal(self.init_dict["beta_mu_mean"], self.init_dict["beta_mu_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
     self.beta_sigma = nn.Parameter(torch.normal(self.init_dict["beta_sigma_mean"], self.init_dict["beta_sigma_std"], [1, num_features, 1, 1], device=device, dtype=dtype))
+    
+    # Check the variance type.
+    if var_type != "exp" and var_type != "sq":
+      raise ValueError("The variance mode should be exp or sq.")
     self.var_type = var_type
   
   def forward(self, x):
+    # First get the dimension.
     batch_size = x.shape[0]
     num_channel = x.shape[1]
     height = x.shape[2]
     width = x.shape[3]
     
+    # Repeat the parameters to match the size of input.
     gamma_mu = self.gamma_mu.repeat([batch_size, 1, height, width])
     gamma_sigma = self.gamma_sigma.repeat([batch_size, 1, height, width])
     beta_mu = self.beta_mu.repeat([batch_size, 1, height, width])
     beta_sigma = self.beta_sigma.repeat([batch_size, 1, height, width])
     
-    normed = self.batch_norm(x)
-    new_mean = normed * gamma_mu + beta_mu
+    # Compute the mean, batch_norm(x) * gamma_mu + beta_mu.
+    normed = self.batch_norm(x) # [batch_size, channels, height, width]
+    new_mean = normed * gamma_mu + beta_mu # [batch_size, channels, height, width]
     
+    # Compute the variance. batch_norm(x)^2 * gamma_var + beta_var.
     if self.var_type == "sq":
       new_var = torch.square(normed) * torch.square(gamma_sigma) + torch.square(beta_sigma)
     else:
       new_var = torch.square(normed) * torch.exp(gamma_sigma) + torch.exp(beta_sigma)
+
+    # Compute the output, by reparameterization trick.
     eps = torch.normal(0, 1, new_mean.shape)
     return new_mean + eps * torch.sqrt(new_var)
 
