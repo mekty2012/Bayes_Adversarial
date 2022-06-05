@@ -47,7 +47,7 @@ def gaussian_resnet_block(input_channels, num_channels, num_residuals, var_type,
       blk.append(gaussian_residual(num_channels, num_channels, var_type=var_type, is_lrt = is_lrt, init_dict=init_dict))
   return blk
 
-def gaussian_resnet18(var_type, init_dict, is_lrt):
+def gaussian_resnet18(var_type, init_dict, is_lrt, use_aleatoric=False):
   if is_lrt:
     b1 = nn.Sequential(
       layers.Gaussian_Conv2D_LRT(1, 64, kernel_size=7, stride=2, padding=3, var_type=var_type, init_dict=init_dict),
@@ -67,7 +67,12 @@ def gaussian_resnet18(var_type, init_dict, is_lrt):
   b4 = nn.Sequential(*gaussian_resnet_block(128, 256, 2, var_type=var_type, init_dict=init_dict, is_lrt = is_lrt))
   b5 = nn.Sequential(*gaussian_resnet_block(256, 512, 2, var_type=var_type, init_dict=init_dict, is_lrt = is_lrt))
 
-  return nn.Sequential(b1, b2, b3, b4, b5,
+  if use_aleatoric:
+    return nn.Sequential(b1, b2, b3, b4, b5,
+                       nn.Flatten(),
+                       layers.Gaussian_Linear(512, 20, var_type=var_type, init_dict=init_dict))
+  else:
+    return nn.Sequential(b1, b2, b3, b4, b5,
                        nn.Flatten(),
                        layers.Gaussian_Linear(512, 10, var_type=var_type, init_dict=init_dict))
 
@@ -102,7 +107,7 @@ def dropout_resnet_block(input_channels, num_channels, num_residuals, dropout_ra
       blk.append(dropout_residual(num_channels, num_channels, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
   return blk
 
-def dropout_resnet18(dropout_rate, dropout_type, init_dict):
+def dropout_resnet18(dropout_rate, dropout_type, init_dict, use_aleatoric=False):
   b1 = nn.Sequential(
       layers.Dropout_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict),
       layers.Dropout_BatchNorm2D(64, dropout_rate, dropout_type),
@@ -114,7 +119,12 @@ def dropout_resnet18(dropout_rate, dropout_type, init_dict):
   b4 = nn.Sequential(*dropout_resnet_block(128, 256, 2, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
   b5 = nn.Sequential(*dropout_resnet_block(256, 512, 2, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
 
-  return nn.Sequential(b1, b2, b3, b4, b5,
+  if use_aleatoric:
+    return nn.Sequential(b1, b2, b3, b4, b5,
+                       nn.Flatten(),
+                       layers.Dropout_Linear(512, 20, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
+  else:
+    return nn.Sequential(b1, b2, b3, b4, b5,
                        nn.Flatten(),
                        layers.Dropout_Linear(512, 10, dropout_rate=dropout_rate, dropout_type=dropout_type, init_dict=init_dict))
 
@@ -155,7 +165,7 @@ def resnet_block(input_channels, num_channels, num_residuals,
 
 class ensemble_resnet18(nn.Module):
 
-  def __init__(self, num_ensemble):
+  def __init__(self, num_ensemble, use_aleatoric=False):
     super().__init__()
     self.models = nn.ModuleList()
     for _ in range(num_ensemble):
@@ -166,18 +176,23 @@ class ensemble_resnet18(nn.Module):
       b3 = nn.Sequential(*resnet_block(64, 128, 2))
       b4 = nn.Sequential(*resnet_block(128, 256, 2))
       b5 = nn.Sequential(*resnet_block(256, 512, 2))
-      net = nn.Sequential(b1, b2, b3, b4, b5,
+      if use_aleatoric:
+        net = nn.Sequential(b1, b2, b3, b4, b5,
                           nn.Flatten(),
-                          nn.Linear(512, 10))
+                          nn.Linear(512, 20))
+      else:
+        net = nn.Sequential(b1, b2, b3, b4, b5,
+                          nn.Flatten(),
+                          nn.Linear(512, 20))
       self.models.append(net)
   
   def forward(self, x):
     res = []
     for model in self.models:
       res.append(model(x))
-    return res
+    return torch.cat(res, dim=0)
 
-def resnet18():
+def resnet18(use_aleatoric=False):
   b1 = nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),
                      nn.BatchNorm2d(64), nn.ReLU(),
                      nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
@@ -185,7 +200,12 @@ def resnet18():
   b3 = nn.Sequential(*resnet_block(64, 128, 2))
   b4 = nn.Sequential(*resnet_block(128, 256, 2))
   b5 = nn.Sequential(*resnet_block(256, 512, 2))
-  net = nn.Sequential(b1, b2, b3, b4, b5,
+  if use_aleatoric:
+    net = nn.Sequential(b1, b2, b3, b4, b5,
+                      nn.Flatten(),
+                      nn.Linear(512, 20))
+  else:
+    net = nn.Sequential(b1, b2, b3, b4, b5,
                       nn.Flatten(),
                       nn.Linear(512, 10))
   return net
@@ -248,7 +268,7 @@ def swag_resnet18_inference(x, model_mean, model_var, lowrank_div, num_sample):
       state[name] = new_param
     model.load_state_dict(state)
     res.append(model(x))
-  return res
+  return torch.cat(res, dim=0)
 
 class BatchEnsemble_Residual(nn.Module):
   def __init__(self, input_channels, num_channels, num_models, use_1x1conv=False, strides=1):
@@ -281,7 +301,7 @@ def batchensemble_resnet_block(input_channels, num_channels, num_residuals, num_
       blk.append(BatchEnsemble_Residual(num_channels, num_channels, num_models))
   return blk
 
-def batchensemble_resnet18(num_models):
+def batchensemble_resnet18(num_models, use_aleatoric=False):
   b1 = nn.Sequential(
     layers.BatchEnsemble_Conv2D(1, 64, kernel_size=7, stride=2, padding=3, num_models=num_models, is_first=True),
     layers.BatchEnsemble_BatchNorm2D(64, num_models), 
@@ -291,7 +311,12 @@ def batchensemble_resnet18(num_models):
   b3 = nn.Sequential(*batchensemble_resnet_block(64, 128, 2, num_models))
   b4 = nn.Sequential(*batchensemble_resnet_block(128, 256, 2, num_models))
   b5 = nn.Sequential(*batchensemble_resnet_block(256, 512, 2, num_models))
-  net = nn.Sequential(b1, b2, b3, b4, b5,
+  if use_aleatoric:
+    net = nn.Sequential(b1, b2, b3, b4, b5,
+                      nn.Flatten(),
+                      layers.BatchEnsemble_Linear(512, 20, num_models, is_first=False))
+  else:
+    net = nn.Sequential(b1, b2, b3, b4, b5,
                       nn.Flatten(),
                       layers.BatchEnsemble_Linear(512, 10, num_models, is_first=False))
   return net
