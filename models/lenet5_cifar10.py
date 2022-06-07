@@ -14,6 +14,7 @@ class lenet5(nn.Module):
     self.conv1 = nn.Conv2d(3, 6, kernel_size=5, stride=1)
     self.conv2 = nn.Conv2d(6, 16, kernel_size=5, stride=1)
     self.conv3 = nn.Conv2d(16, 120, kernel_size=5, stride=1)
+    self.dropout = nn.Dropout(0.4)
     self.fc1 = nn.Linear(120, 84)
     if use_aleatoric:
       self.fc2 = nn.Linear(84, 20)
@@ -21,13 +22,14 @@ class lenet5(nn.Module):
       self.fc2 = nn.Linear(84, 10)
 
   def forward(self, x):
-    x = torch.tanh(self.conv1(x))
+    x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv2(x))
+    x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv3(x))
+    x = torch.relu(self.conv3(x))
     x = x.view(-1, 120)
-    x = torch.tanh(self.fc1(x))
+    x = torch.relu(self.fc1(x))
+    x = self.dropout(x)
     x = self.fc2(x)
     return x
 
@@ -49,13 +51,13 @@ class gaussian_lenet5(nn.Module):
       self.fc2 = layers.Gaussian_Linear(84, 10, var_type)
   
   def forward(self, x):
-    x = torch.tanh(self.conv1(x))
+    x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv2(x))
+    x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv3(x))
+    x = torch.relu(self.conv3(x))
     x = x.view(-1, 120)
-    x = torch.tanh(self.fc1(x))
+    x = torch.relu(self.fc1(x))
     x = self.fc2(x)
     return x
 
@@ -72,13 +74,13 @@ class dropout_lenet5(nn.Module):
       self.fc2 = layers.Dropout_Linear(84, 10, dropout_rate, dropout_type)
   
   def forward(self, x):
-    x = torch.tanh(self.conv1(x))
+    x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv2(x))
+    x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv3(x))
+    x = torch.relu(self.conv3(x))
     x = x.view(-1, 120)
-    x = torch.tanh(self.fc1(x))
+    x = torch.relu(self.fc1(x))
     x = self.fc2(x)
     return x
   
@@ -161,6 +163,7 @@ class batchensemble_lenet5(nn.Module):
     self.conv1 = layers.BatchEnsemble_Conv2D(3, 6, 5, num_models=num_ensemble, stride=1, is_first=True)
     self.conv2 =layers.BatchEnsemble_Conv2D(6, 16, 5, num_models=num_ensemble, stride=1, is_first=False)
     self.conv3 = layers.BatchEnsemble_Conv2D(16, 120, 5, num_models=num_ensemble, stride=1, is_first=False)
+    self.dropout = nn.Dropout(0.4)
     self.fc1 = layers.BatchEnsemble_Linear(120, 84, num_models=num_ensemble, is_first=False)
     if use_aleatoric:
       self.fc2 = layers.BatchEnsemble_Linear(84, 20, num_models=num_ensemble, is_first=False)
@@ -168,12 +171,13 @@ class batchensemble_lenet5(nn.Module):
       self.fc2 = layers.BatchEnsemble_Linear(84, 10, num_models=num_ensemble, is_first=False)
   
   def forward(self, x):
-    x = torch.tanh(self.conv1(x))
+    x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv2(x))
+    x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
-    x = torch.tanh(self.conv3(x))
+    x = torch.relu(self.conv3(x))
     x = x.view(-1, 120)
-    x = torch.tanh(self.fc1(x))
+    x = torch.relu(self.fc1(x))
+    x = self.dropout(x)
     x = self.fc2(x)
     return x
