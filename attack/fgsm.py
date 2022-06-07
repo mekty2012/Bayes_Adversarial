@@ -1,4 +1,4 @@
-from attack import Attacker
+from .attacker import Attacker
 import torch
 import torch.nn.functional as F
 
