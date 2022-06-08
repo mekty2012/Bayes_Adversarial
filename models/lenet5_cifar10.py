@@ -11,10 +11,10 @@ import torch.nn.functional as F
 class lenet5(nn.Module):
   def __init__(self, use_aleatoric=False):
     super(lenet5,self).__init__()
-    self.conv1 = nn.Conv2d(3, 6, kernel_size=5, stride=1)
-    self.conv2 = nn.Conv2d(6, 16, kernel_size=5, stride=1)
-    self.conv3 = nn.Conv2d(16, 120, kernel_size=5, stride=1)
-    self.dropout = nn.Dropout(0.4)
+    self.conv1 = nn.Sequential(nn.Conv2d(3, 32, 3), nn.ReLU(), nn.Conv2d(32, 32, 3))
+    self.conv2 = nn.Sequential(nn.Conv2d(32, 64, 3), nn.ReLU(), nn.Conv2d(64, 64, 3))
+    self.conv3 = nn.Sequential(nn.Conv2d(64, 120, 3), nn.ReLU(), nn.Conv2d(120, 120, 3))
+    self.dropout = nn.Dropout(0.1)
     self.fc1 = nn.Linear(120, 84)
     if use_aleatoric:
       self.fc2 = nn.Linear(84, 20)
@@ -24,9 +24,12 @@ class lenet5(nn.Module):
   def forward(self, x):
     x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
+    x = self.dropout(x)
     x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
+    x = self.dropout(x)
     x = torch.relu(self.conv3(x))
+    x = self.dropout(x)
     x = x.view(-1, 120)
     x = torch.relu(self.fc1(x))
     x = self.dropout(x)
@@ -37,13 +40,13 @@ class gaussian_lenet5(nn.Module):
   def __init__(self, var_type, init_dict, is_lrt, use_aleatoric=False):
     super().__init__()
     if is_lrt:
-      self.conv1 = layers.Gaussian_Conv2D_LRT(3, 6, kernel_size=5, stride=1, var_type=var_type)
-      self.conv2 = layers.Gaussian_Conv2D_LRT(6, 16, kernel_size=5, stride=1, var_type=var_type)
-      self.conv3 = layers.Gaussian_Conv2D_LRT(16, 120, kernel_size=5, stride=1, var_type=var_type)
+      self.conv1 = nn.Sequential(layers.Gaussian_Conv2D_LRT(3, 32, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(32, 32, kernel_size=3, stride=1, var_type=var_type))
+      self.conv2 = nn.Sequential(layers.Gaussian_Conv2D_LRT(32, 64, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(64, 64, kernel_size=3, stride=1, var_type=var_type))
+      self.conv3 = nn.Sequential(layers.Gaussian_Conv2D_LRT(64, 120, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(120, 120, kernel_size=3, stride=1, var_type=var_type))
     else:
-      self.conv1 = layers.Gaussian_Conv2D(1, 6, kernel_size=5, stride=1, var_type=var_type)
-      self.conv2 = layers.Gaussian_Conv2D(6, 16, kernel_size=5, stride=1, var_type=var_type)
-      self.conv3 = layers.Gaussian_Conv2D(16, 120, kernel_size=5, stride=1, var_type=var_type)
+      self.conv1 = nn.Sequential(layers.Gaussian_Conv2D(3, 32, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(32, 32, kernel_size=3, stride=1, var_type=var_type))
+      self.conv2 = nn.Sequential(layers.Gaussian_Conv2D(32, 64, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(64, 64, kernel_size=3, stride=1, var_type=var_type))
+      self.conv3 = nn.Sequential(layers.Gaussian_Conv2D(64, 120, kernel_size=3, stride=1, var_type=var_type), nn.ReLU(), layers.Gaussian_Conv2D_LRT(120, 120, kernel_size=3, stride=1, var_type=var_type))
     self.fc1 = layers.Gaussian_Linear(120, 84, var_type)
     if use_aleatoric:
       self.fc2 = layers.Gaussian_Linear(84, 20, var_type)
@@ -64,9 +67,9 @@ class gaussian_lenet5(nn.Module):
 class dropout_lenet5(nn.Module):
   def __init__(self, dropout_rate, dropout_type, init_dict, use_aleatoric=False):
     super().__init__()
-    self.conv1 = layers.Dropout_Conv2D(3, 6, 5, dropout_rate, dropout_type, stride=1)
-    self.conv2 = layers.Dropout_Conv2D(6, 16, 5, dropout_rate, dropout_type, stride=1)
-    self.conv3 = layers.Dropout_Conv2D(16, 120, 5, dropout_rate, dropout_type, stride=1)
+    self.conv1 = nn.Sequential(layers.Dropout_Conv2D(3, 32, 3, dropout_rate, dropout_type, stride=1), nn.ReLU(), layers.Dropout_Conv2D(32, 32, 3, dropout_rate, dropout_type, stride=1))
+    self.conv2 = nn.Sequential(layers.Dropout_Conv2D(32, 64, 3, dropout_rate, dropout_type, stride=1), nn.ReLU(), layers.Dropout_Conv2D(64, 64, 3, dropout_rate, dropout_type, stride=1))
+    self.conv3 = nn.Sequential(layers.Dropout_Conv2D(64, 120, 3, dropout_rate, dropout_type, stride=1), nn.ReLU(), layers.Dropout_Conv2D(120, 120, 3, dropout_rate, dropout_type, stride=1))
     self.fc1 = layers.Dropout_Linear(120, 84, dropout_rate, dropout_type)
     if use_aleatoric:
       self.fc2 = layers.Dropout_Linear(84, 20, dropout_rate, dropout_type)
@@ -160,10 +163,10 @@ def swag_lenet5_inference(x, model_mean, model_var, lowrank_div, num_sample):
 class batchensemble_lenet5(nn.Module):
   def __init__(self, num_ensemble, use_aleatoric=False):
     super().__init__()
-    self.conv1 = layers.BatchEnsemble_Conv2D(3, 6, 5, num_models=num_ensemble, stride=1, is_first=True)
-    self.conv2 =layers.BatchEnsemble_Conv2D(6, 16, 5, num_models=num_ensemble, stride=1, is_first=False)
-    self.conv3 = layers.BatchEnsemble_Conv2D(16, 120, 5, num_models=num_ensemble, stride=1, is_first=False)
-    self.dropout = nn.Dropout(0.4)
+    self.conv1 = nn.Sequential(layers.BatchEnsemble_Conv2D(3, 32, 3, num_models=num_ensemble, stride=1, is_first=True), nn.ReLU(), layers.BatchEnsemble_Conv2D(32, 32, 3, num_models=num_ensemble, stride=1, is_first=False))
+    self.conv2 = nn.Sequential(layers.BatchEnsemble_Conv2D(32, 64, 3, num_models=num_ensemble, stride=1, is_first=False), nn.ReLU(), layers.BatchEnsemble_Conv2D(64, 64, 3, num_models=num_ensemble, stride=1, is_first=False))
+    self.conv3 = nn.Sequential(layers.BatchEnsemble_Conv2D(64, 120, 3, num_models=num_ensemble, stride=1, is_first=False), nn.ReLU(), layers.BatchEnsemble_Conv2D(120, 120, 3, num_models=num_ensemble, stride=1, is_first=False))
+    self.dropout = nn.Dropout(0.1)
     self.fc1 = layers.BatchEnsemble_Linear(120, 84, num_models=num_ensemble, is_first=False)
     if use_aleatoric:
       self.fc2 = layers.BatchEnsemble_Linear(84, 20, num_models=num_ensemble, is_first=False)
@@ -173,9 +176,12 @@ class batchensemble_lenet5(nn.Module):
   def forward(self, x):
     x = torch.relu(self.conv1(x))
     x = F.avg_pool2d(x, 2, 2)
+    x = self.dropout(x)
     x = torch.relu(self.conv2(x))
     x = F.avg_pool2d(x, 2, 2)
+    x = self.dropout(x)
     x = torch.relu(self.conv3(x))
+    x = self.dropout(x)
     x = x.view(-1, 120)
     x = torch.relu(self.fc1(x))
     x = self.dropout(x)
