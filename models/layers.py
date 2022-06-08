@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 from math import sqrt
 
-eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
 class Gaussian_Linear(nn.Module):
   """
   Implements the Linear layer for BNN.
@@ -52,6 +50,7 @@ class Gaussian_Linear(nn.Module):
     if var_type != "exp" and var_type != "sq":
       raise ValueError("The variance mode should be exp or sq.")
     self.var_type = var_type
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
   def forward(self, x):
     if self.use_bias: # Bias is True
@@ -72,7 +71,7 @@ class Gaussian_Linear(nn.Module):
         new_var = torch.matmul(torch.square(x), torch.square(self.weight_sigma)) # [batch_size, out_features]
     
     # Reparameterization
-    eps = torch.normal(0, 1, new_mean.shape, device=eps_device) # [batch_size, out_features]
+    eps = torch.normal(0, 1, new_mean.shape, device=self.eps_device) # [batch_size, out_features]
     return new_mean + eps * torch.sqrt(new_var) # [batch_size, out_features]
 
 class Gaussian_Conv2D_LRT(nn.Module):
@@ -145,6 +144,7 @@ class Gaussian_Conv2D_LRT(nn.Module):
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
       self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
 
   def forward(self, x):
@@ -166,7 +166,7 @@ class Gaussian_Conv2D_LRT(nn.Module):
         new_var = nn.functional.conv2d(torch.square(x), torch.square(self.weight_sigma), stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups) # [batch_size, out_channels, new_height, new_width]
 
     # (Local) Reparameterization trick
-    eps = torch.normal(0, 1, new_mean.shape, device=eps_device) # [batch_size, out_channels, new_height, new_width]
+    eps = torch.normal(0, 1, new_mean.shape, device=self.eps_device) # [batch_size, out_channels, new_height, new_width]
     return new_mean + eps * torch.sqrt(new_var) # [batch_size, out_channels, new_height, new_width]
 
 class Gaussian_Conv2D(nn.Module):
@@ -235,6 +235,7 @@ class Gaussian_Conv2D(nn.Module):
     if self.use_bias:
       self.bias_mu = nn.Parameter(data=torch.normal(self.init_dict["b_mu_mean"], self.init_dict["b_mu_std"], [self.out_channels], dtype=dtype, device=device))
       self.bias_sigma = nn.Parameter(data=torch.normal(self.init_dict["b_sig_mean"], self.init_dict["b_sig_std"], [self.out_channels], dtype=dtype, device=device))
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
   def forward(self, x):
     # This time, we iterate for each samples in minibatch.
@@ -255,8 +256,8 @@ class Gaussian_Conv2D(nn.Module):
       xi = torch.unsqueeze(x[i, :, :, :], dim=0) # [1, channel, height, width]
       if self.use_bias:
         # Sample weights, with reparameterization.
-        w_eps = torch.normal(0, 1, self.weight_mu.shape, device=eps_device)
-        b_eps = torch.normal(0, 1, self.bias_mu.shape, device=eps_device)
+        w_eps = torch.normal(0, 1, self.weight_mu.shape, device=self.eps_device)
+        b_eps = torch.normal(0, 1, self.bias_mu.shape, device=self.eps_device)
         new_weight = self.weight_mu + w_eps * torch.abs(weight_std)
         new_bias = self.bias_mu + b_eps * torch.abs(bias_std)
         
@@ -311,6 +312,7 @@ class Gaussian_BatchNorm2D(nn.Module):
     if var_type != "exp" and var_type != "sq":
       raise ValueError("The variance mode should be exp or sq.")
     self.var_type = var_type
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
   
   def forward(self, x):
     # First get the dimension.
@@ -336,7 +338,7 @@ class Gaussian_BatchNorm2D(nn.Module):
       new_var = torch.square(normed) * torch.exp(gamma_sigma) + torch.exp(beta_sigma)
 
     # Compute the output, by reparameterization trick.
-    eps = torch.normal(0, 1, new_mean.shape, device=eps_device)
+    eps = torch.normal(0, 1, new_mean.shape, device=self.eps_device)
     return new_mean + eps * torch.sqrt(new_var)
 
 class Dropout_Linear(nn.Module):
@@ -384,9 +386,10 @@ class Dropout_Linear(nn.Module):
     if dropout_type not in ["w", "f", "c"]:
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type=dropout_type
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
   
   def dropout(self, x):
-    return x * (torch.rand(x.shape, device=eps_device) > self.dropout_rate)
+    return x * (torch.rand(x.shape, device=self.eps_device) > self.dropout_rate)
   
   def forward(self, x):
     if self.dropout_type == "w":
@@ -489,9 +492,11 @@ class Dropout_Conv2D(nn.Module):
     # If use bias, define the bias parameter.
     if self.use_bias:
       self.bias = nn.Parameter(data=torch.normal(self.init_dict["b_mean"], self.init_dict["b_std"], [out_channels], dtype=dtype, device=device))
+    
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
   def dropout(self, x):
-    return x * (torch.rand(x.shape, device=eps_device) > self.dropout_rate)
+    return x * (torch.rand(x.shape, device=self.eps_device) > self.dropout_rate)
 
   def forward(self, x):
     if self.dropout_type == "w":
@@ -575,9 +580,10 @@ class Dropout_BatchNorm2D(nn.Module):
       raise ValueError("dropout_type should be either w(weight), f(feature), c(channel).")
     self.dropout_type=dropout_type
     self.dropout_rate = dropout_rate
+    self.eps_device = 'cuda' if torch.cuda.is_available() else 'cpu'
   
   def dropout(self, x):
-    return x * (torch.rand(x.shape, device=eps_device) > self.dropout_rate)
+    return x * (torch.rand(x.shape, device=self.eps_device) > self.dropout_rate)
 
   def forward(self, x):
     # First get the dimension.
